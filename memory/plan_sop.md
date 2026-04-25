@@ -1,5 +1,7 @@
 # Plan Mode SOP
 
+> 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
+
 **触发**：3步以上有依赖/多文件协同/条件分支/需并行 | **禁用**：1-2步简单任务直接做
 任务开始前必须先创建工作目录 `./plan_XXX/`（XXX=任务英文短名）
 单独使用一个code_run({'inline_eval':True, 'script':'handler.enter_plan_mode("./plan_XXX/plan.md")'})进入plan模式

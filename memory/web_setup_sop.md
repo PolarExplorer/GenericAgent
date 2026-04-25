@@ -1,5 +1,7 @@
 # Web 工具链初始化执行 SOP
 
+> 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
+
 若 web_scan 和 web_execute_js 已测试可用，无需执行此 SOP。
 仅供初始安装时，code_run 可用但 web 工具尚未配置的场景。
 

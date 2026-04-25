@@ -1,5 +1,7 @@
 # 自主行动 SOP
 
+> 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
+
 ⚠️ **路径警告**：autonomous_reports 在 temp/ 下，用`./autonomous_reports/`访问，**不是**`../memory/autonomous_reports/`或`../autonomous_reports/`！TODO在cwd下。
 报告存于 `./autonomous_reports/`，文件名 `RXX_简短描述.md`（XX从 history.txt 推断自增）。
 

@@ -1,5 +1,7 @@
 # TMWebDriver SOP
 
+> 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
+
 - 直接用web_scan/web_execute_js工具。本文件只记录特性和坑。
 - 底层：`../TMWebDriver.py`通过Chrome扩展接管用户浏览器（保留登录态/Cookie）
 - 非Selenium/Playwright，保留用户浏览器登录态

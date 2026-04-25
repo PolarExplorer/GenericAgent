@@ -1,5 +1,7 @@
 # 定时任务 SOP
 
+> 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
+
 目录：`../sche_tasks/` 放任务定义JSON，`../sche_tasks/done/` 放执行报告
 
 ## 任务JSON格式（*.json）

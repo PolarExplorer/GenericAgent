@@ -88,3 +88,10 @@ L4: ../memory/L4_raw_sessions/ (历史会话层 - scheduler反射自动收集，
             │
             └─ NO → 判定为『通用常识』或『冗余信息』: 严禁存储，直接丢弃
 ```
+---
+## Git 版本管理
+memory/ 目录有独立 Git 仓库（与 GA 主仓库独立），用于防污染和回滚。
+- **何时 commit**：每次记忆写入（L1/L2/L3 新增或修改）完成后，执行 `git add -A && git commit -m "<简述>"` 
+- **commit message 格式**：`<类型>: <内容>`，类型包括 `fix`/`add`/`update`/`refactor`
+- **回滚**：发现记忆被错误修改时，用 `git diff` 定位 → `git checkout -- <file>` 恢复
+- **排除**：`__pycache__/`、`L4_raw_sessions/` 不纳入版本管理
