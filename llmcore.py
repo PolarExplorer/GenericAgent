@@ -92,6 +92,33 @@ def trim_messages_history(history, context_win):
             while history and history[0].get('role') != 'user': history.pop(0)
             if history and history[0].get('role') == 'user': history[0] = _sanitize_leading_user_msg(history[0])
             cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
+        # Post-trim orphan cleanup: remove orphaned assistant(tool_use) at boundary
+        if history:
+            i = 0
+            while i < len(history) - 1:
+                m = history[i]
+                if m.get('role') == 'assistant':
+                    content = m.get('content', [])
+                    has_tool_use = any(isinstance(b, dict) and b.get('type') == 'tool_use' for b in content) if isinstance(content, list) else False
+                    if has_tool_use:
+                        # Check if next message has matching tool_results
+                        nxt = history[i + 1]
+                        if nxt.get('role') != 'user':
+                            history.pop(i); continue
+                        nxt_content = nxt.get('content', [])
+                        if isinstance(nxt_content, list):
+                            result_ids = {b.get('tool_use_id') for b in nxt_content if isinstance(b, dict) and b.get('type') == 'tool_result'}
+                            use_ids = {b.get('id') for b in content if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('id')}
+                            if not result_ids.intersection(use_ids):
+                                history.pop(i)
+                                # Also strip orphaned tool_result blocks from the now-exposed user msg
+                                if i < len(history) and history[i].get('role') == 'user':
+                                    uc = history[i].get('content', [])
+                                    if isinstance(uc, list):
+                                        cleaned = [b for b in uc if not (isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') in use_ids)]
+                                        if cleaned != uc: history[i] = {**history[i], 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
+                                continue
+                i += 1
         print(f'[Debug] Trimmed context, current: {cost} chars, {len(history)} messages.')
 
 def auto_make_url(base, path):
@@ -551,6 +578,7 @@ def _drop_unsigned_thinking(messages):
 class ClaudeSession(BaseSession):
     def raw_ask(self, messages):
         if self.max_tokens is None: self.max_tokens = 8192
+        messages = _fix_messages(messages)
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json", "anthropic-version": "2023-06-01", "anthropic-beta": "prompt-caching-2024-07-31"}
         payload = {"model": self.model, "messages": messages, "max_tokens": self.max_tokens, "stream": True}
         if self.temperature != 1: payload["temperature"] = self.temperature
@@ -591,6 +619,12 @@ def _fix_messages(messages):
             has = {b.get('tool_use_id') for b in _wrap(m['content']) if isinstance(b, dict) and b.get('type') == 'tool_result'}
             miss = [uid for uid in uses if uid not in has]
             if miss: m = {**m, 'content': [{"type": "tool_result", "tool_use_id": uid, "content": "(error)"} for uid in miss] + _wrap(m['content'])}
+            # Reverse: strip tool_result blocks referencing non-existent tool_use ids
+            use_set = set(uses)
+            orphan_results = [b for b in _wrap(m['content']) if isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') not in use_set]
+            if orphan_results:
+                cleaned = [b for b in _wrap(m['content']) if not (isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') not in use_set)]
+                m = {**m, 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
         fixed.append(m)
     while fixed and fixed[0]['role'] != 'user': fixed.pop(0)
     return fixed

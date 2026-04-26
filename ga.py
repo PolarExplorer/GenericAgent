@@ -7,6 +7,7 @@ if sys.stderr is None: sys.stderr = open(os.devnull, "w")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agent_loop import BaseHandler, StepOutcome, json_default
+from memory.mem_manager import compress_working_memory
 
 def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop_signal=[]):
     """代码执行器
@@ -507,7 +508,9 @@ class GenericAgentHandler(BaseHandler):
         h_str = "\n".join(self.history_info[-40:])
         prompt = f"\n### [WORKING MEMORY]\n<history>\n{h_str}\n</history>"
         prompt += f"\nCurrent turn: {self.current_turn}\n"
-        if self.working.get('key_info'): prompt += f"\n<key_info>{self.working.get('key_info')}</key_info>"
+        if self.working.get('key_info'):
+            ki = compress_working_memory(self.working['key_info'])
+            prompt += f"\n<key_info>{ki}</key_info>"
         if self.working.get('related_sop'): prompt += f"\n有不清晰的地方请再次读取{self.working.get('related_sop')}"
         if getattr(self.parent, 'verbose', False):
             try: print(prompt)

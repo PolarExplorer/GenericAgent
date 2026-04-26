@@ -8,6 +8,9 @@
 - 优先用`--bg`后台(print PID exit)，可同一code_run内sleep后poll；非--bg禁合并启动+轮询
 - subagent的cwd还是temp，不是task目录
 - input：目标+约束即可，subagent同等智能。**禁写步骤/过度描述**，大量数据给路径
+- **精确prompt构造原则**：只传任务目标、边界约束、输入/输出文件绝对路径、完成定义；不传主agent冗长推理、无关背景、预设实现细节。让 subagent 自主选择最优路径，但明确它不能越界的边界。
+- **推荐输入结构**：`任务目标` / `成功判定` / `硬约束` / `输入文件` / `输出文件` / `已知风险或待确认点`
+- **推荐输出结构**：`结论` / `关键证据位置` / `未确定点` / `需要主agent决策的事项`
 - 通信：output.txt(append,`[ROUND END]`=轮完成) → 写reply.txt继续 → 不写10min退出。reply后输出为output1/2/3.txt(同格式)
 - 干预文件：`_stop`(当轮结束退出) | `_keyinfo`(注入working memory) | `_intervene`(追加指令)
 - **主agent空闲时应读output观察进度，必要时用干预文件纠偏，禁止无脑长时间sleep轮询**
