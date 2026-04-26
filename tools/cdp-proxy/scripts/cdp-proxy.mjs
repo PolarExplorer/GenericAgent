@@ -86,10 +86,30 @@ async function discoverChromePort() {
     const ok = await checkPort(port);
     if (ok) {
       console.log(`[CDP Proxy] 扫描发现 Chrome 调试端口: ${port}`);
-      return { port, wsPath: null };
+      // 通过 /json/version 获取完整 WebSocket URL（含 UUID）
+      const wsPath = await fetchWsPathFromVersion(port);
+      return { port, wsPath };
     }
   }
 
+  return null;
+}
+
+// 从 /json/version 端点获取完整的 webSocketDebuggerUrl
+async function fetchWsPathFromVersion(port) {
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/json/version`);
+    const info = await resp.json();
+    const wsUrl = info.webSocketDebuggerUrl;
+    if (wsUrl) {
+      // 提取路径部分 (如 /devtools/browser/xxx-xxx)
+      const urlObj = new URL(wsUrl);
+      console.log(`[CDP Proxy] 从 /json/version 获取 wsPath: ${urlObj.pathname}`);
+      return urlObj.pathname;
+    }
+  } catch (e) {
+    console.warn(`[CDP Proxy] 获取 /json/version 失败: ${e.message}`);
+  }
   return null;
 }
 
