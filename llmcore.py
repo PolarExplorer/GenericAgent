@@ -300,8 +300,15 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
                 blocks.append({"type": "tool_use", "id": bid, "name": tc["name"], "input": inp})
         return blocks
 
+_LAST_USAGE = {}
+
+def last_usage():
+    return dict(_LAST_USAGE)
+
 def _record_usage(usage, api_mode):
     if not usage: return
+    global _LAST_USAGE
+    _LAST_USAGE = dict(usage)
     if api_mode == 'responses':
         cached = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
         inp = usage.get("input_tokens", 0)
