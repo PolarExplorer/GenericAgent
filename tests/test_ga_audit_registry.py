@@ -7,7 +7,11 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from ga_audit import _load_registry, _run_checks  # noqa: E402
+import json
+import tempfile
+import shutil
+
+from ga_audit import _load_registry, _run_checks, _on_turn_end, _CONSEC_EXEC_HISTORY  # noqa: E402
 
 
 CASES = [
@@ -168,6 +172,62 @@ class AuditRegistryDetectionTest(unittest.TestCase):
                 matched = [check for check in checks if check["id"] == rule_id]
                 self.assertTrue(matched, f"{rule_id} was not evaluated")
                 self.assertEqual(expected, matched[0]["status"])
+
+
+class OnTurnEndR061Test(unittest.TestCase):
+    """Verify R061 through real _on_turn_end → audit_log chain."""
+
+    def setUp(self):
+        import ga_audit
+        ga_audit._CONSEC_EXEC_HISTORY[:] = []
+        self._orig_dir = ga_audit._DASHBOARD_DIR
+        self._orig_log = ga_audit._AUDIT_LOG_PATH
+        self._tmp = tempfile.mkdtemp()
+        import pathlib
+        ga_audit._DASHBOARD_DIR = pathlib.Path(self._tmp)
+        ga_audit._AUDIT_LOG_PATH = pathlib.Path(self._tmp) / "audit_log.json"
+
+    def tearDown(self):
+        import ga_audit
+        ga_audit._DASHBOARD_DIR = self._orig_dir
+        ga_audit._AUDIT_LOG_PATH = self._orig_log
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _last_event(self):
+        import ga_audit
+        log_path = ga_audit._AUDIT_LOG_PATH
+        if not log_path.exists():
+            return None
+        events = json.loads(log_path.read_text(encoding="utf-8"))
+        return events[-1] if events else None
+
+    def test_r061_fail_via_on_turn_end(self):
+        """3 consecutive task_exec turns without subagent → R061 fail in audit log."""
+        for turn_idx in range(1, 5):
+            ctx = {"turn": turn_idx, "summary": "", "tool_calls": [{"name": "code_run", "args": {"script": "pass"}}]}
+            _on_turn_end(ctx)
+        event = self._last_event()
+        self.assertIsNotNone(event, "No event in audit log")
+        r061 = [c for c in event.get("constraint_checks", []) if c["id"] == "R061"]
+        self.assertTrue(r061, "R061 not in constraint_checks")
+        self.assertEqual("fail", r061[0]["status"], f"Expected fail but got {r061[0]['status']}")
+
+    def test_r061_pass_when_subagent_breaks_streak(self):
+        """Subagent call within window → R061 pass in audit log."""
+        # 2 task_exec turns, then a subagent turn, then 1 more task_exec
+        for turn_idx, tc in enumerate([
+            [{"name": "code_run", "args": {"script": "pass"}}],
+            [{"name": "web_scan", "args": {}}],
+            [{"name": "subagent", "args": {}}],
+            [{"name": "file_read", "args": {"path": "x"}}],
+        ], start=1):
+            ctx = {"turn": turn_idx, "summary": "", "tool_calls": tc}
+            _on_turn_end(ctx)
+        event = self._last_event()
+        self.assertIsNotNone(event, "No event in audit log")
+        r061 = [c for c in event.get("constraint_checks", []) if c["id"] == "R061"]
+        self.assertTrue(r061, "R061 not in constraint_checks")
+        self.assertEqual("pass", r061[0]["status"], f"Expected pass but got {r061[0]['status']}")
 
 
 if __name__ == "__main__":
