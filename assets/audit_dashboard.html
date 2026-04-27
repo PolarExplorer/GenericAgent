@@ -94,6 +94,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .task-card .task-summary-line { color:var(--text); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .event .task-title { color:var(--text); font-weight:600; }
 .event .task-id-mini { color:var(--text-dim); }
+.stop-modal-overlay { position:fixed; inset:0; background:rgba(0, 0, 0, 0.68); z-index:9999; display:none; align-items:center; justify-content:center; padding:20px; }
+.stop-modal-card { width:min(100%, 420px); background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 16px 40px rgba(0, 0, 0, 0.45); }
+.stop-modal-warn { color:var(--red); }
+.stop-modal-input { width:100%; margin-top:14px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-size:14px; }
+.stop-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
 </style>
 </head>
 <body>
@@ -135,6 +140,20 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
   <div class="bottom">
     <div class="panel"><h2>🚨 违规记录</h2><div id="violations-list"><span style="color:var(--text-dim);font-size:13px">暂无违规</span></div></div>
     <div class="panel"><h2>🤖 子Agent调度</h2><div id="subagents-list"><span style="color:var(--text-dim);font-size:13px">暂无记录</span></div></div>
+  </div>
+</div>
+<div class="stop-modal-overlay" id="stop-confirm-modal">
+  <div class="stop-modal-card" role="dialog" aria-modal="true" aria-labelledby="stop-confirm-title">
+    <div class="stop-modal-warn" style="font-size:24px; margin-bottom:10px">⚠️</div>
+    <div id="stop-confirm-title" style="font-size:18px; font-weight:700; margin-bottom:10px">确认停止 GA</div>
+    <div style="color:var(--text); line-height:1.6">此操作将调用 GA 原生 abort()，当前正在执行的任务将被中断。</div>
+    <div style="color:var(--text-dim); line-height:1.6; margin-top:6px">这不会 kill 进程，但当前轮次的工作可能丢失。</div>
+    <div style="color:var(--text-dim); line-height:1.6; margin-top:6px">当前 control 端口：<span id="stop-confirm-port" style="color:var(--green)">8766</span></div>
+    <input class="stop-modal-input" id="stop-confirm-input" type="text" placeholder="输入 STOP 确认" autocomplete="off">
+    <div class="stop-modal-actions">
+      <button class="btn" id="stop-confirm-cancel">取消</button>
+      <button class="btn btn-danger" id="stop-confirm-submit" disabled>确认停止</button>
+    </div>
   </div>
 </div>
 <script>
@@ -436,13 +455,29 @@ async function poll() {
 }
 
 async function requestStopGA() {
+  const modal = document.getElementById('stop-confirm-modal');
+  const input = document.getElementById('stop-confirm-input');
+  const submit = document.getElementById('stop-confirm-submit');
+  const portEl = document.getElementById('stop-confirm-port');
+  const stopUrl = 'http://127.0.0.1:8766/api/stop';
+  const port = (stopUrl.match(/:(\d+)\//) || [])[1] || '8766';
+  portEl.textContent = port;
+  modal.style.display = 'flex';
+  input.value = '';
+  submit.disabled = true;
+  input.focus();
+}
+
+async function confirmStopGA() {
   const btn = document.getElementById('btn-stop-ga');
-  if (!confirm('确认请求 GA 停止当前任务？\n这会调用 GA 原生 abort()，不会 kill 进程。')) return;
+  const modal = document.getElementById('stop-confirm-modal');
+  const stopUrl = 'http://127.0.0.1:8766/api/stop';
+  modal.style.display = 'none';
   btn.disabled = true;
   const oldText = btn.textContent;
   btn.textContent = '请求停止中...';
   try {
-    const r = await fetch('http://127.0.0.1:8766/api/stop', { method: 'POST' });
+    const r = await fetch(stopUrl, { method: 'POST' });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || !data.ok) throw new Error(data.error || r.statusText);
     btn.textContent = '已请求停止';
@@ -461,6 +496,13 @@ async function requestStopGA() {
   if (reg) renderConstraints(reg, []);
 })();
 document.getElementById('btn-stop-ga').addEventListener('click', requestStopGA);
+document.getElementById('stop-confirm-cancel').addEventListener('click', () => {
+  document.getElementById('stop-confirm-modal').style.display = 'none';
+});
+document.getElementById('stop-confirm-submit').addEventListener('click', confirmStopGA);
+document.getElementById('stop-confirm-input').addEventListener('input', (e) => {
+  document.getElementById('stop-confirm-submit').disabled = e.target.value.trim().toUpperCase() !== 'STOP';
+});
 document.getElementById('view-mode').addEventListener('change', (e) => {
   viewMode = e.target.value;
   if (viewMode === 'selected' && !selectedTaskId) selectedTaskId = document.getElementById('task-select').value;

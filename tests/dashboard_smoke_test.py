@@ -253,6 +253,7 @@ def main() -> int:
         checks.append(check("view-mode" in dashboard_text and "task-select" in dashboard_text and "task-summary" in dashboard_text,
                             "dashboard_template_has_task_filter_controls"))
         checks.append(check("btn-stop-ga" in dashboard_text, "dashboard_template_has_stop_button"))
+        checks.append(check("stop-confirm-modal" in dashboard_text, "dashboard_template_has_stop_confirm_modal"))
         checks.append(check("constraint" in dashboard_text.lower(), "dashboard_template_has_constraint_rendering"))
 
         events = json.loads(audit_resp.get("text", "[]")) if audit_resp else []
