@@ -508,6 +508,18 @@ class _TaskCard:
         self.final = text or "_(无文本输出)_"
         self._push()
 
+    def waiting_reply(self, question, candidates):
+        """ask_user 场景：显示问题 + 候选项，状态设为等待回复"""
+        self.status = "⏳ 等待回复"
+        lines = [question]
+        if candidates:
+            lines.append("")
+            for i, c in enumerate(candidates, 1):
+                lines.append(f"**{i}.** {c}")
+            lines.append("\n_请直接回复选项编号或内容_")
+        self.final = "\n".join(lines)
+        self._push()
+
     def fail(self, msg):
         self.status = f"❌ {msg}"
         self._push()
@@ -520,6 +532,17 @@ def _make_task_hook(card, done_event, on_final):
             if ctx.get('exit_reason'):
                 resp = ctx.get('response')
                 raw = resp.content if hasattr(resp, 'content') else str(resp)
+                # 检测 ask_user INTERRUPT：显示问题+候选项
+                er = ctx['exit_reason']
+                interrupt_data = er.get('data') if isinstance(er, dict) else None
+                if isinstance(interrupt_data, dict) and interrupt_data.get('status') == 'INTERRUPT':
+                    inner = interrupt_data.get('data', {})
+                    question = inner.get('question', '')
+                    candidates = inner.get('candidates', [])
+                    if question:
+                        card.waiting_reply(question, candidates)
+                        done_event.set()
+                        return
                 card.done(_display_text(raw))
                 on_final(raw)
                 done_event.set()
@@ -545,7 +568,20 @@ def handle_message(data):
         else:
             send_message(open_id, f"⚠️ 暂不支持处理此类飞书消息：{message.message_type}")
         return
-    print(f"收到消息 [{open_id}] ({message.message_type}, {len(image_paths)} images): {user_input[:200]}")
+    msg_id = getattr(message, 'message_id', '?')
+    create_time = getattr(message, 'create_time', '?')
+    # 防重放：丢弃超过120秒的旧消息
+    import time as _time
+    msg_age = None
+    try:
+        msg_age = _time.time() - int(create_time) / 1000
+        if msg_age > 120:
+            print(f"[STALE] 丢弃过期消息 (age={msg_age:.0f}s, msg_id={msg_id}): {user_input[:100]}")
+            return
+    except (ValueError, TypeError):
+        pass
+    age_str = f"{msg_age:.0f}s" if msg_age is not None else "?"
+    print(f"收到消息 [{open_id}] (msg_id={msg_id}, create_time={create_time}, age={age_str}, {message.message_type}, {len(image_paths)} images): {user_input[:200]}")
     if message.message_type == "text" and user_input.startswith("/"):
         return handle_command(open_id, user_input, chat_id)
 
