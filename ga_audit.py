@@ -127,6 +127,125 @@ def _check_code_pattern(pattern, text):
         return pattern.lower() in text.lower()
 
 
+def _coerce_tool_name(tool_call):
+    if not isinstance(tool_call, dict):
+        return ""
+    return str(tool_call.get("tool_name") or tool_call.get("name") or "")
+
+
+def _coerce_tool_args(tool_call):
+    if not isinstance(tool_call, dict):
+        return {}
+    args = tool_call.get("args", {})
+    return args if isinstance(args, dict) else {}
+
+
+def _extract_subagent_from_command(command):
+    """Best-effort parse of agentmain.py subagent launch command; never raise."""
+    if not isinstance(command, str) or not command.strip():
+        return None
+    lowered = command.lower()
+    if "agentmain.py" not in lowered:
+        return None
+    markers = ("--task", "--input", "--llm_no", "--bg")
+    if not any(marker in lowered for marker in markers):
+        return None
+    result = {"source_tool": "command", "command": command.strip()}
+
+    def _assign_flag(flag_name, target_key):
+        patterns = [
+            rf'{re.escape(flag_name)}\s+"([^"]+)"',
+            rf"{re.escape(flag_name)}\s+'([^']+)'",
+            rf'{re.escape(flag_name)}\s+(\S+)',
+            rf'{re.escape(flag_name)}=([^\s]+)',
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, command)
+            if m:
+                result[target_key] = m.group(1)
+                return
+
+    _assign_flag("--task", "task")
+    _assign_flag("--input", "input")
+    _assign_flag("--llm_no", "llm_no")
+    if re.search(r'(^|\s)--bg(?:\s|$|=)', command):
+        if "--bg=" in command:
+            m = re.search(r'--bg=([^\s]+)', command)
+            if m:
+                result["bg"] = m.group(1).strip().lower() not in ("", "0", "false", "no")
+        else:
+            result["bg"] = True
+
+    try:
+        parts = shlex.split(command, posix=True)
+    except Exception:
+        parts = command.strip().split()
+    for idx, part in enumerate(parts):
+        normalized = str(part).strip()
+        key = normalized.lower()
+        next_val = parts[idx + 1].strip() if idx + 1 < len(parts) and isinstance(parts[idx + 1], str) else ""
+        if key == "--task" and next_val and "task" not in result:
+            result["task"] = next_val
+        elif key == "--input" and next_val and "input" not in result:
+            result["input"] = next_val
+        elif key == "--llm_no" and next_val and "llm_no" not in result:
+            result["llm_no"] = next_val
+        elif key == "--bg" and "bg" not in result:
+            result["bg"] = True
+        elif key.startswith("--task=") and "task" not in result:
+            result["task"] = normalized.split("=", 1)[1]
+        elif key.startswith("--input=") and "input" not in result:
+            result["input"] = normalized.split("=", 1)[1]
+        elif key.startswith("--llm_no=") and "llm_no" not in result:
+            result["llm_no"] = normalized.split("=", 1)[1]
+        elif key.startswith("--bg=") and "bg" not in result:
+            val = normalized.split("=", 1)[1].strip().lower()
+            result["bg"] = val not in ("", "0", "false", "no")
+    return result
+
+
+def _extract_subagent(tool_calls, turn):
+    """Detect direct subagent tools and agentmain.py-launched subagents; never raise."""
+    try:
+        tool_names = []
+        direct_tools = []
+        for tc in (tool_calls or []):
+            tool_name = _coerce_tool_name(tc)
+            if tool_name:
+                tool_names.append(tool_name)
+                if "subagent" in tool_name.lower():
+                    direct_tools.append(tool_name)
+        if direct_tools:
+            return {"source_tool": direct_tools[0], "tools": tool_names, "turn": turn}
+
+        exec_tools = {"code_run", "shell", "bash"}
+        for tc in (tool_calls or []):
+            tool_name = _coerce_tool_name(tc)
+            if tool_name not in exec_tools:
+                continue
+            args = _coerce_tool_args(tc)
+            commands = []
+            for key in ("script", "command", "cmd", "code", "input", "text"):
+                value = args.get(key)
+                if isinstance(value, str) and value.strip():
+                    commands.append(value)
+            if not commands:
+                try:
+                    serialized = json.dumps(args, ensure_ascii=False)
+                except Exception:
+                    serialized = ""
+                if serialized:
+                    commands.append(serialized)
+            for command in commands:
+                parsed = _extract_subagent_from_command(command)
+                if parsed:
+                    parsed["source_tool"] = tool_name
+                    return parsed
+    except Exception:
+        return None
+    return None
+
+
 _CONSEC_EXEC_HISTORY = []  # module-level: tracks per-turn execution tool usage for R004
 
 _CONSULTATION_TRIGGERS = [
@@ -537,9 +656,10 @@ def _on_turn_end(ctx):
         ctx["_user_message"] = user_message
 
         # Update consecutive execution history for R004
-        tool_names = [tc.get("tool_name", "") for tc in (tool_calls or [])]
+        tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
+        subagent = _extract_subagent(tool_calls, turn)
         has_exec = any(t in _EXEC_TOOLS for t in tool_names)
-        has_subagent = any("subagent" in t.lower() for t in tool_names)
+        has_subagent = bool(subagent)
         _CONSEC_EXEC_HISTORY.append({"exec": has_exec, "subagent": has_subagent})
         if len(_CONSEC_EXEC_HISTORY) > 20:
             _CONSEC_EXEC_HISTORY[:] = _CONSEC_EXEC_HISTORY[-20:]
@@ -560,10 +680,7 @@ def _on_turn_end(ctx):
         checks = _run_checks(registry, tool_calls, ctx)
 
         # Detect subagent usage
-        subagent = None
-        tool_names = [tc.get("tool_name", "") for tc in (tool_calls or [])]
-        if any("subagent" in tn.lower() for tn in tool_names):
-            subagent = {"tools": tool_names, "turn": turn}
+        tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
 
         # Violations
         violations = [c for c in checks if c["status"] == "fail"]

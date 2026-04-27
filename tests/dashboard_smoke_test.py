@@ -156,7 +156,7 @@ def make_cases() -> List[Dict[str, Any]]:
         },
         {
             "turn": 103,
-            "summary": "<summary>smoke turn103 subagent evidence</summary> DOM verification target",
+            "summary": "<summary>smoke turn103 direct subagent evidence</summary> DOM verification target",
             "tool_calls": [
                 tool_call("subagent_run", {"goal": "smoke"}),
                 tool_call("web_scan", {"url": "http://127.0.0.1/dashboard.html"}),
@@ -165,6 +165,23 @@ def make_cases() -> List[Dict[str, Any]]:
                 "model": "dashboard-smoke-model",
                 "usage": {"input": 20, "output": 10},
                 "choices": [{"message": {"content": "verified"}}],
+            },
+        },
+        {
+            "turn": 104,
+            "summary": "<summary>smoke turn104 code_run subagent evidence</summary> launch verification target",
+            "tool_calls": [
+                tool_call(
+                    "code_run",
+                    {
+                        "script": 'python agentmain.py --task "Investigate smoke" --input D:/tmp/input.txt --llm_no 7 --bg',
+                    },
+                ),
+            ],
+            "response": {
+                "model": "dashboard-smoke-model",
+                "usage": {"input": 15, "output": 8},
+                "choices": [{"message": {"content": "verified code_run subagent"}}],
             },
         },
     ]
@@ -269,9 +286,28 @@ def main() -> int:
         ]
         checks.append(check(len(events) >= 3, "synthetic_turn_events_written", {"event_count": len(events)}))
         checks.append(check(len(task_ids) == 1 and task_ids[0], "single_task_id_filterable", {"task_ids": task_ids}))
-        checks.append(check(any(e.get("turn") == 101 for e in events) and any(e.get("turn") == 103 for e in events),
-                            "turn_101_and_103_present"))
-        checks.append(check(any(e.get("subagent") for e in events), "subagent_event_present"))
+        checks.append(check(
+            all(any(e.get("turn") == expected for e in events) for expected in (101, 103, 104)),
+            "turn_101_103_104_present",
+        ))
+        subagent_events = [e for e in events if e.get("subagent")]
+        code_run_subagent = next((e for e in subagent_events if e.get("turn") == 104), None)
+        checks.append(check(bool(subagent_events), "subagent_event_present"))
+        checks.append(check(
+            bool(code_run_subagent),
+            "code_run_subagent_event_present",
+            code_run_subagent,
+        ))
+        checks.append(check(
+            isinstance((code_run_subagent or {}).get("subagent"), dict)
+            and (code_run_subagent or {}).get("subagent", {}).get("source_tool") == "code_run"
+            and (code_run_subagent or {}).get("subagent", {}).get("task") == "Investigate smoke"
+            and (code_run_subagent or {}).get("subagent", {}).get("input") == "D:/tmp/input.txt"
+            and str((code_run_subagent or {}).get("subagent", {}).get("llm_no")) == "7"
+            and (code_run_subagent or {}).get("subagent", {}).get("bg") is True,
+            "code_run_subagent_fields_parsed",
+            (code_run_subagent or {}).get("subagent"),
+        ))
         checks.append(check(bool(fail_events), "intentional_fail_visible_in_data",
                             {"fail_turns": [e.get("turn") for e in fail_events]}))
         checks.append(check(any(c.get("status") == "fail" for c in c005_hits), "c005_memory_write_fail_detected",
