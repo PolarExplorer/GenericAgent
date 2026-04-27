@@ -74,6 +74,10 @@ class GeneraticAgent:
         self.llm_no = 0;  self.inc_out = False
         self.handler = None; self.verbose = True
         self.llmclient = self.llmclients[self.llm_no]
+        try:
+            import ga_audit; ga_audit.install(self)
+        except Exception:
+            pass
 
     def next_llm(self, n=-1):
         self.llm_no = ((self.llm_no + 1) if n < 0 else n) % len(self.llmclients)
