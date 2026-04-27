@@ -124,6 +124,34 @@ CASES = [
 ]
 
 
+class SubagentDelegationGuardTest(unittest.TestCase):
+    def setUp(self):
+        import ga_audit
+        ga_audit._CONSEC_EXEC_HISTORY[:] = []
+        self.registry = _load_registry()
+
+    def test_r061_fails_after_three_direct_task_exec_turns(self):
+        import ga_audit
+        # Simulate 3 consecutive turns of task_exec without subagent
+        for _ in range(3):
+            ga_audit._CONSEC_EXEC_HISTORY.append({"exec": True, "task_exec": True, "subagent": False})
+        checks = _run_checks(self.registry, [{"name": "code_run", "args": {}}], {})
+        matched = [check for check in checks if check["id"] == "R061"]
+        self.assertTrue(matched, "R061 was not evaluated")
+        self.assertEqual("fail", matched[0]["status"])
+
+    def test_r061_passes_when_subagent_used_within_window(self):
+        import ga_audit
+        # 2 direct turns then a subagent turn → window broken, should pass
+        ga_audit._CONSEC_EXEC_HISTORY.append({"exec": True, "task_exec": True, "subagent": False})
+        ga_audit._CONSEC_EXEC_HISTORY.append({"exec": True, "task_exec": True, "subagent": False})
+        ga_audit._CONSEC_EXEC_HISTORY.append({"exec": True, "task_exec": True, "subagent": True})
+        checks = _run_checks(self.registry, [{"name": "web_scan", "args": {}}], {})
+        matched = [check for check in checks if check["id"] == "R061"]
+        self.assertTrue(matched, "R061 was not evaluated")
+        self.assertEqual("pass", matched[0]["status"])
+
+
 class AuditRegistryDetectionTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

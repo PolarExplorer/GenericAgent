@@ -1384,6 +1384,20 @@
     },
     {
       "id": "R061",
+      "name": "连续>=3轮执行类子任务必须委托 subagent",
+      "category": "分发纪律",
+      "priority": "high",
+      "source": "RULES #14",
+      "description": "连续>=3轮主Agent直接执行编码/信息收集类工具调用而未委托subagent，视为违规。",
+      "detection": {
+        "type": "subagent_delegation_guard",
+        "threshold": 3,
+        "description": "检测连续>=3轮 coding/info-gathering 工具直执且未委托subagent"
+      },
+      "enabled": true
+    },
+    {
+      "id": "R062",
       "name": "透明背景图片生成需降级 gpt-image-1.5",
       "category": "image",
       "priority": "low",
@@ -1398,7 +1412,7 @@
       "enabled": true
     },
     {
-      "id": "R062",
+      "id": "R063",
       "name": "研究报告精华段必须产出新判断",
       "category": "research",
       "priority": "medium",
@@ -1410,7 +1424,7 @@
       "enabled": true
     },
     {
-      "id": "R063",
+      "id": "R064",
       "name": "写作禁止教科书式开头",
       "category": "writing",
       "priority": "low",

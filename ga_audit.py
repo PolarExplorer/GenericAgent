@@ -261,6 +261,10 @@ _EXEC_TOOLS = {
     "code_run", "file_write", "file_patch", "file_create",
     "file_overwrite", "shell", "bash", "web_execute_js",
 }
+_TASK_EXEC_TOOLS = {
+    "code_run", "file_write", "file_patch", "file_create",
+    "file_overwrite", "shell", "bash", "web_execute_js", "file_read", "web_scan",
+}
 
 
 def _check_context(rule, tool_calls, ctx):
@@ -289,7 +293,7 @@ def _check_context(rule, tool_calls, ctx):
 def _check_consecutive_execution(rule, tool_calls, ctx):
     """R004: >=threshold consecutive turns of execution tools without subagent = fail.
     NOTE: _CONSEC_EXEC_HISTORY is populated by _on_turn_end BEFORE this is called."""
-    tool_names = [tc.get("tool_name", "") for tc in (tool_calls or [])]
+    tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
     has_exec = bool(set(tool_names) & _EXEC_TOOLS)
     if not has_exec:
         return "pass"
@@ -303,6 +307,22 @@ def _check_consecutive_execution(rule, tool_calls, ctx):
 
     all_exec_no_sub = all(r["exec"] and not r["subagent"] for r in recent)
     return "fail" if all_exec_no_sub else "pass"
+
+
+def _check_subagent_delegation_guard(rule, tool_calls, ctx):
+    """Fail when >=threshold consecutive coding/info-gathering turns ran directly without subagent delegation."""
+    tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
+    has_task_exec = bool(set(tool_names) & _TASK_EXEC_TOOLS)
+    if not has_task_exec:
+        return "pass"
+
+    threshold = rule.get("detection", {}).get("threshold", 3)
+    recent = _CONSEC_EXEC_HISTORY[-threshold:]
+    if len(recent) < threshold:
+        return "pass"
+
+    all_direct_task_exec = all(r.get("task_exec") and not r.get("subagent") for r in recent)
+    return "fail" if all_direct_task_exec else "pass"
 
 
 def _check_tool_negative(rule, tool_calls):
@@ -593,6 +613,9 @@ def _run_checks(registry, tool_calls, ctx):
         elif det_type == "consecutive_execution_check":
             status = _check_consecutive_execution(item, tool_calls, ctx)
 
+        elif det_type == "subagent_delegation_guard":
+            status = _check_subagent_delegation_guard(item, tool_calls, ctx)
+
         elif det_type == "context_check":
             status = _check_context(item, tool_calls, ctx)
 
@@ -655,12 +678,13 @@ def _on_turn_end(ctx):
                     break
         ctx["_user_message"] = user_message
 
-        # Update consecutive execution history for R004
+        # Update consecutive execution history for R004 / delegation guard checks
         tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
         subagent = _extract_subagent(tool_calls, turn)
         has_exec = any(t in _EXEC_TOOLS for t in tool_names)
+        has_task_exec = any(t in _TASK_EXEC_TOOLS for t in tool_names)
         has_subagent = bool(subagent)
-        _CONSEC_EXEC_HISTORY.append({"exec": has_exec, "subagent": has_subagent})
+        _CONSEC_EXEC_HISTORY.append({"exec": has_exec, "task_exec": has_task_exec, "subagent": has_subagent})
         if len(_CONSEC_EXEC_HISTORY) > 20:
             _CONSEC_EXEC_HISTORY[:] = _CONSEC_EXEC_HISTORY[-20:]
         model = _extract_model(ctx, ga_self, response)
