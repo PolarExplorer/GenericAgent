@@ -1,0 +1,6 @@
+{
+  "user": "修一下审计检测，然后告诉我结果",
+  "assistant": "已经修复完成。unittest 测试通过。",
+  "tool_calls": [{"name": "code_run", "args": {"script": "python -m unittest"}}],
+  "tool_results": [{"status": "success", "exit_code": 0, "stdout": "OK"}]
+}

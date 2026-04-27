@@ -1,0 +1,6 @@
+{
+  "user": "实现一个复杂的审计语义检测层",
+  "assistant": "我开始改文件。",
+  "tool_calls": [{"name": "file_write", "args": {"path": "semantic_audit.py"}}],
+  "tool_results": []
+}

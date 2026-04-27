@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "mode": "advisory_only",
+  "rules": [
+    {
+      "id": "R007",
+      "name": "No evidence, no claim",
+      "category": "验证纪律",
+      "description": "Completion or repair claims must be backed by concrete evidence from tool output in the same task window.",
+      "severity_default": "warning",
+      "positive_patterns": ["完成", "已完成", "修复", "已修复", "done", "fixed", "可用", "works"],
+      "evidence_patterns": ["exit_code.*0", "status.*success", "测试通过", "unittest", "pytest", "截图", "diff", "git status"]
+    },
+    {
+      "id": "R012",
+      "name": "复杂任务先探索与方案收敛",
+      "category": "规划纪律",
+      "description": "Complex/multistep/ambiguous tasks should show exploration, plan, assumptions or acceptance criteria before implementation.",
+      "severity_default": "advisory",
+      "positive_patterns": ["复杂", "多步", "方案", "实现", "设计", "架构", "重构"],
+      "evidence_patterns": ["plan", "计划", "acceptance", "验收", "assumption", "假设", "探索", "方案收敛"]
+    },
+    {
+      "id": "R033",
+      "name": "失败后禁止无新信息重复操作",
+      "category": "调试纪律",
+      "description": "Repeated failures must collect new information or switch strategy instead of retrying the same action blindly.",
+      "severity_default": "warning",
+      "positive_patterns": ["error", "failed", "失败", "报错", "No content found"],
+      "evidence_patterns": ["读取", "日志", "定位", "hypothesis", "假设", "切换策略", "debugging", "复现", "新信息"]
+    }
+  ]
+}

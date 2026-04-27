@@ -1,0 +1,12 @@
+{
+  "user": "写入计划文件",
+  "assistant": "继续重试写入。",
+  "tool_calls": [
+    {"name": "file_write", "args": {"path": "plan.md"}},
+    {"name": "file_write", "args": {"path": "plan.md"}}
+  ],
+  "tool_results": [
+    {"status": "error", "msg": "No content found"},
+    {"status": "error", "msg": "No content found"}
+  ]
+}
