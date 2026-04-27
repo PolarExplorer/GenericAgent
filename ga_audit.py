@@ -478,6 +478,21 @@ def _run_checks(registry, tool_calls, ctx):
     return results
 
 
+def _run_semantic_advisory(event):
+    """Run optional semantic advisory checks; never raise or emit hard failures."""
+    try:
+        from semantic_audit import evaluate_event, load_semantic_rules
+        findings = evaluate_event(event, load_semantic_rules())
+        safe_findings = []
+        for finding in findings or []:
+            if finding.get("severity") == "fail":
+                continue
+            safe_findings.append(finding)
+        return safe_findings
+    except Exception:
+        return []
+
+
 def _on_turn_end(ctx):
     """Hook called at end of each GA turn with locals() from turn_end_callback."""
     try:
@@ -543,6 +558,7 @@ def _on_turn_end(ctx):
             "subagent": subagent,
             "violations": violations,
         }
+        event["semantic_findings"] = _run_semantic_advisory(event)
 
         # Ensure dashboard dir exists and append
         _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)

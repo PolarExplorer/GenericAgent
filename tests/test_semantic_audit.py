@@ -9,6 +9,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from semantic_audit import evaluate_event, evaluate_events, load_semantic_rules  # noqa: E402
+from ga_audit import _run_semantic_advisory  # noqa: E402
 
 FIXTURES = os.path.join(REPO_ROOT, "tests", "fixtures", "audit_semantic")
 
@@ -55,6 +56,12 @@ class SemanticAuditTest(unittest.TestCase):
 
     def test_phase1_never_emits_fail(self):
         findings = evaluate_event(load_fixture("claim_without_evidence.json"), self.rules)
+        self.assertNotIn("fail", [f["severity"] for f in findings])
+
+    def test_ga_audit_semantic_advisory_runtime_hook(self):
+        event = load_fixture("claim_without_evidence.json")
+        findings = _run_semantic_advisory(event)
+        self.assertIn("R007", [f["rule_id"] for f in findings])
         self.assertNotIn("fail", [f["severity"] for f in findings])
 
 
