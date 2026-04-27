@@ -11,7 +11,9 @@ from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).parent
 _REGISTRY_PATH = _SCRIPT_DIR / "assets" / "constraints_registry.json"
+_DASHBOARD_TEMPLATE_PATH = _SCRIPT_DIR / "assets" / "audit_dashboard.html"
 _DASHBOARD_DIR = _SCRIPT_DIR / "temp" / "dashboard"
+_DASHBOARD_HTML_PATH = _DASHBOARD_DIR / "dashboard.html"
 _AUDIT_LOG_PATH = _DASHBOARD_DIR / "audit_log.json"
 
 _registry_cache = None
@@ -64,6 +66,23 @@ def _install_task_id_hook(agent):
     agent.put_task = audited_put_task
     agent.task_queue.get = audited_queue_get
     agent._ga_audit_task_id_hooked = True
+
+
+def _ensure_dashboard_assets():
+    """Materialize the tracked dashboard template into the runtime dashboard dir."""
+    try:
+        if not _DASHBOARD_TEMPLATE_PATH.exists():
+            return
+        should_copy = not _DASHBOARD_HTML_PATH.exists()
+        if not should_copy:
+            existing = _DASHBOARD_HTML_PATH.read_text(encoding="utf-8", errors="ignore")
+            should_copy = "semantic-findings" not in existing or "renderSemanticFindings" not in existing
+        if should_copy:
+            _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
+            template = _DASHBOARD_TEMPLATE_PATH.read_text(encoding="utf-8")
+            _DASHBOARD_HTML_PATH.write_text(template, encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _load_registry():
@@ -689,6 +708,7 @@ _orig_install = install
 def install(agent):
     global _agent_ref
     _agent_ref = agent
+    _ensure_dashboard_assets()
     _install_task_id_hook(agent)
     ok = _orig_install(agent)
     _ensure_control_server()

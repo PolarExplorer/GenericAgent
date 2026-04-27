@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GA Monitor — 可视化监控面板</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
+}
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+.grid { display: grid; grid-template-rows: 56px auto 1fr 220px; grid-template-columns: 320px 1fr; height: 100vh; gap: 1px; background: var(--border); }
+.topbar { grid-column: 1 / -1; background: var(--surface); display: flex; align-items: center; padding: 0 20px; gap: 24px; }
+.topbar h1 { font-size: 16px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.topbar .status { display: flex; gap: 16px; font-size: 13px; flex-wrap: wrap; align-items: center; }
+.topbar .status span { display: flex; align-items: center; gap: 5px; }
+.controls { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.btn { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.btn-danger { border-color: #7d2b2b; color: #ffb4b4; }
+.btn-danger:hover { border-color: var(--red); background: #2a1111; }
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot-green { background: var(--green); }
+.dot-yellow { background: var(--yellow); }
+.dot-red { background: var(--red); }
+.panel { background: var(--surface); overflow-y: auto; padding: 12px; }
+.panel h2 { font-size: 13px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; letter-spacing: 0.5px; }
+.left { grid-row: 3; grid-column: 1; }
+.right { grid-row: 3; grid-column: 2; }
+.bottom { grid-row: 4; grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); }
+.constraint { background: var(--bg); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; border-left: 3px solid var(--green); font-size: 13px; }
+.constraint.fail { border-left-color: var(--red); }
+.constraint.skip { border-left-color: var(--border); }
+.constraint .cid { color: var(--text-dim); font-size: 11px; }
+.constraint .cname { color: var(--text); }
+.constraint .cstatus { float: right; font-size: 11px; font-weight: 600; }
+.cstatus.pass { color: var(--green); }
+.cstatus.fail { color: var(--red); }
+.cstatus.skip { color: var(--text-dim); }
+.event { background: var(--bg); border-radius: 6px; padding: 10px 14px; margin-bottom: 6px; font-size: 13px; border-left: 3px solid var(--accent); }
+.event .meta { color: var(--text-dim); font-size: 11px; margin-bottom: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+.event .summary { color: var(--text); }
+.event .tok { color: var(--yellow); font-weight: 600; }
+.event .tok-detail { color: var(--text-dim); }
+.event .tools { margin-top: 4px; }
+.event .tools span { background: #1f2937; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: var(--purple); margin-right: 4px; }
+.event.has-violation { border-left-color: var(--red); }
+.event.has-semantic { border-left-color: var(--yellow); }
+.event.has-violation.has-semantic { border-left-color: var(--red); }
+.semantic-findings { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.semantic-finding { background: #2a2111; border: 1px solid #5f4713; color: #ffd98a; padding: 2px 6px; border-radius: 4px; font-size: 11px; cursor: help; }
+.semantic-finding.warn { background: #2a2111; border-color: #7a5a16; color: #ffd98a; }
+.semantic-finding.info { background: #102036; border-color: #254b7a; color: #9dcbff; }
+.semantic-finding .sid { font-weight: 700; }
+.violation { background: #1c0f0f; border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; border-left: 3px solid var(--red); }
+.violation .vid { color: var(--red); font-weight: 600; }
+.violation .vdetail { color: var(--text-dim); font-size: 12px; }
+.subagent-entry { background: var(--bg); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; border-left: 3px solid var(--purple); }
+.budget-bar { width: 120px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.budget-bar .fill { height: 100%; background: var(--green); transition: width 0.3s; }
+.budget-bar .fill.warn { background: var(--yellow); }
+.budget-bar .fill.danger { background: var(--red); }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+/* governance bar */
+.governance-bar { display:flex; gap:12px; padding:8px 16px; background:var(--surface); border-bottom:1px solid var(--border); grid-column: 1 / -1; }
+.gov-card { flex:1; padding:10px 14px; border-radius:6px; border:1px solid var(--border); background:var(--bg); text-align:center; }
+.gov-card .gov-label { font-size:11px; color:var(--text-dim); margin-bottom:4px; }
+.gov-card .gov-value { font-size:20px; font-weight:700; }
+.gov-card .gov-value.green { color:var(--green); }
+.gov-card .gov-value.yellow { color:var(--yellow); }
+.gov-card .gov-value.red { color:var(--red); }
+/* violation detail expand */
+.violation { cursor:pointer; }
+.violation .v-detail-body { display:none; margin-top:6px; padding:6px 8px; background:var(--bg); border-radius:4px; font-size:12px; color:var(--text-dim); white-space:pre-wrap; word-break:break-all; }
+.violation.expanded .v-detail-body { display:block; }
+/* subagent enhanced */
+.subagent-entry .sa-meta { font-size:11px; color:var(--text-dim); margin-top:2px; }
+/* MVP-v2 task filter */
+.view-controls { display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+.view-controls select { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; }
+.view-hint { color:var(--text-dim); font-size:12px; }
+.task-summary { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:8px; margin-bottom:12px; }
+.task-card { background:var(--bg); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:6px; padding:8px 10px; cursor:pointer; font-size:12px; }
+.task-card:hover { border-color:var(--accent); }
+.task-card.active { border-color:var(--green); border-left-color:var(--green); }
+.task-card .task-title { color:var(--text); font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.task-card .task-id { color:var(--text-dim); font-size:11px; margin-top:2px; word-break:break-all; }
+.task-card .task-meta { color:var(--text-dim); margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; }
+.task-card .task-summary-line { color:var(--text); margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.event .task-title { color:var(--text); font-weight:600; }
+.event .task-id-mini { color:var(--text-dim); }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="topbar">
+    <h1>🛡️ GA Monitor</h1>
+    <div class="status">
+      <span><span class="dot dot-green" id="dot-status"></span><span id="lbl-status">等待数据</span></span>
+      <span>Task Turns: <b id="lbl-turn">0</b></span>
+      <span>Model: <b id="lbl-model">—</b></span>
+      <span>Task Tokens: <b id="lbl-tokens">0</b></span>
+      <span>Budget: <span class="budget-bar"><span class="fill" id="budget-fill" style="width:0%"></span></span> <b id="lbl-budget">0%</b></span>
+      <span>Violations: <b id="lbl-violations" style="color:var(--green)">0</b></span>
+      <span style="color:var(--text-dim);font-size:11px" id="lbl-updated">—</span>
+      <span class="controls"><button class="btn btn-danger" id="btn-stop-ga" title="调用 GA 原生 abort()，不 kill 进程">停止 GA</button></span>
+    </div>
+  </div>
+  <div class="governance-bar" id="governance-bar">
+    <div class="gov-card"><div class="gov-label">通过率</div><div class="gov-value green" id="gov-pass-rate">—</div></div>
+    <div class="gov-card"><div class="gov-label">违规数</div><div class="gov-value green" id="gov-violations">0</div></div>
+    <div class="gov-card"><div class="gov-label">风险等级</div><div class="gov-value green" id="gov-risk">🟢 低</div></div>
+    <div class="gov-card"><div class="gov-label">连续安全轮</div><div class="gov-value green" id="gov-safe-streak">0</div></div>
+  </div>
+  <div class="panel left"><h2>📋 约束 / 规则</h2><div id="constraints-list"></div></div>
+  <div class="panel right"><h2>📡 事件流</h2>
+    <div class="view-controls">
+      <label class="view-hint">视图</label>
+      <select id="view-mode">
+        <option value="recent">最近80条</option>
+        <option value="current">当前任务</option>
+        <option value="selected">指定任务</option>
+      </select>
+      <select id="task-select" title="选择 task_id"></select>
+      <span class="view-hint" id="view-hint">默认显示最近80条</span>
+    </div>
+    <div id="task-summary" class="task-summary"></div>
+    <div id="events-list"></div>
+  </div>
+  <div class="bottom">
+    <div class="panel"><h2>🚨 违规记录</h2><div id="violations-list"><span style="color:var(--text-dim);font-size:13px">暂无违规</span></div></div>
+    <div class="panel"><h2>🤖 子Agent调度</h2><div id="subagents-list"><span style="color:var(--text-dim);font-size:13px">暂无记录</span></div></div>
+  </div>
+</div>
+<script>
+const POLL_MS = 2000;
+let lastLen = 0;
+let lastSignature = '';
+let viewMode = 'recent';
+let selectedTaskId = '';
+let cachedEvents = [];
+let cachedRegistry = {constraints:[], rules:[]};
+
+async function fetchJSON(url) {
+  try { const r = await fetch(url + '?t=' + Date.now()); if (!r.ok) return null; return await r.json(); }
+  catch { return null; }
+}
+
+function renderConstraints(registry, latestChecks) {
+  const el = document.getElementById('constraints-list');
+  const all = [...(registry.constraints||[]), ...(registry.rules||[])];
+  const checkMap = {};
+  (latestChecks||[]).forEach(c => checkMap[c.id] = c.status);
+  el.innerHTML = all.map(item => {
+    const st = checkMap[item.id] || 'skip';
+    const label = {pass:'✓ PASS', fail:'✗ FAIL', skip:'— SKIP'}[st] || st;
+    return `<div class="constraint ${st}"><span class="cstatus ${st}">${label}</span><span class="cid">${item.id}</span> <span class="cname">${item.name}</span></div>`;
+  }).join('');
+}
+
+function tokenTotal(tokens) {
+  if (!tokens) return 0;
+  return (tokens.input || 0) + (tokens.output || 0);
+}
+
+function tokenLabel(n) {
+  if (!n) return '0';
+  return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
+}
+
+function nonControlEvents(events) {
+  return (events || []).filter(ev => ev.turn !== 'control');
+}
+
+function latestTaskId(events) {
+  const latest = [...nonControlEvents(events)].reverse().find(ev => ev.task_id);
+  return latest ? latest.task_id : '';
+}
+
+function currentTaskEvents(events) {
+  const tid = latestTaskId(events);
+  if (tid) return nonControlEvents(events).filter(ev => ev.task_id === tid);
+  const clean = nonControlEvents(events);
+  let start = 0;
+  for (let i = clean.length - 1; i > 0; i--) {
+    const cur = Number(clean[i].turn);
+    const prev = Number(clean[i - 1].turn);
+    if ((Number.isFinite(cur) && cur <= 1) || (Number.isFinite(cur) && Number.isFinite(prev) && cur <= prev)) {
+      start = i;
+      break;
+    }
+  }
+  return clean.slice(start);
+}
+
+function taskIdLabel(taskId) {
+  if (!taskId) return '(无 task_id)';
+  return taskId.length > 34 ? taskId.slice(0, 18) + '…' + taskId.slice(-10) : taskId;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>\"]/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;'}[ch]));
+}
+
+function compactSummary(text, maxLen = 28) {
+  const raw = String(text || '').replace(/<summary>|<\/summary>/g, '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+  return raw.length > maxLen ? raw.slice(0, maxLen - 1) + '…' : raw;
+}
+
+function shortTaskMeta(taskId) {
+  if (!taskId || taskId === '__no_task__') return '无 task_id';
+  const m = String(taskId).match(/^(\d{8})-(\d{6})-([^-]+)-(.+)$/);
+  if (!m) return taskIdLabel(taskId);
+  const hhmm = m[2].slice(0, 2) + ':' + m[2].slice(2, 4);
+  return `${hhmm} · ${m[3]} · ${m[4]}`;
+}
+
+function taskTitleFromEvents(events, taskId) {
+  const related = nonControlEvents(events).filter(ev => (ev.task_id || '__no_task__') === taskId);
+  const first = related.find(ev => ev.summary);
+  const latest = [...related].reverse().find(ev => ev.summary);
+  return compactSummary((first && first.summary) || (latest && latest.summary) || shortTaskMeta(taskId));
+}
+
+function taskTitleFromSummary(summary, taskId) {
+  return compactSummary(summary || shortTaskMeta(taskId));
+}
+
+function buildTaskSummaries(events) {
+  const map = new Map();
+  nonControlEvents(events).forEach((ev, idx) => {
+    const tid = ev.task_id || '__no_task__';
+    if (!map.has(tid)) map.set(tid, {task_id: tid, events: [], tokens: 0, violations: 0, lastIndex: idx, lastTime: '', firstSummary: '', lastSummary: '', title: ''});
+    const item = map.get(tid);
+    item.events.push(ev);
+    item.tokens += tokenTotal(ev.tokens);
+    item.violations += (ev.violations || []).length;
+    item.lastIndex = idx;
+    item.lastTime = ev.timestamp || item.lastTime;
+    if (ev.summary && !item.firstSummary) item.firstSummary = ev.summary;
+    item.lastSummary = ev.summary || item.lastSummary;
+    item.title = taskTitleFromSummary(item.firstSummary || item.lastSummary, tid);
+  });
+  return [...map.values()].sort((a, b) => b.lastIndex - a.lastIndex);
+}
+
+function selectedEvents(events) {
+  const clean = nonControlEvents(events);
+  if (viewMode === 'current') return currentTaskEvents(events);
+  if (viewMode === 'selected' && selectedTaskId) return clean.filter(ev => (ev.task_id || '__no_task__') === selectedTaskId);
+  return clean.slice(-80);
+}
+
+function renderTaskControls(events, shownEvents) {
+  const summaries = buildTaskSummaries(events);
+  const taskSelect = document.getElementById('task-select');
+  const activeTid = selectedTaskId || latestTaskId(events);
+  taskSelect.innerHTML = summaries.map(t => `<option value="${escapeHtml(t.task_id)}"${t.task_id === activeTid ? ' selected' : ''}>${escapeHtml(t.title || taskTitleFromSummary(t.lastSummary, t.task_id))} · ${escapeHtml(shortTaskMeta(t.task_id))} (${t.events.length})</option>`).join('');
+  taskSelect.disabled = summaries.length === 0;
+  const hint = viewMode === 'recent' ? `显示最近 ${shownEvents.length} 条 / 总 ${nonControlEvents(events).length} 条` :
+    viewMode === 'current' ? `显示当前任务 ${shownEvents.length} 条` : `显示指定任务 ${shownEvents.length} 条`;
+  document.getElementById('view-hint').textContent = hint;
+  const box = document.getElementById('task-summary');
+  box.innerHTML = summaries.slice(0, 8).map(t => {
+    const active = (viewMode === 'selected' && t.task_id === selectedTaskId) || (viewMode === 'current' && t.task_id === latestTaskId(events));
+    return `<div class="task-card${active ? ' active' : ''}" data-task-id="${escapeHtml(t.task_id)}">
+      <div class="task-title" title="${escapeHtml(t.title || '')}">${escapeHtml(t.title || taskTitleFromSummary(t.lastSummary, t.task_id))}</div>
+      <div class="task-id">${escapeHtml(shortTaskMeta(t.task_id))}</div>
+      <div class="task-meta"><span>${t.events.length} turns</span><span>${tokenLabel(t.tokens)} tok</span><span>${t.violations} violations</span><span>${escapeHtml(t.lastTime)}</span></div>
+      <div class="task-summary-line">${escapeHtml(t.lastSummary || '')}</div>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('.task-card').forEach(card => card.addEventListener('click', () => {
+    selectedTaskId = card.dataset.taskId;
+    viewMode = 'selected';
+    document.getElementById('view-mode').value = viewMode;
+    renderDashboard(cachedEvents, cachedRegistry, true);
+  }));
+}
+
+function renderSemanticFindings(findings) {
+  const safe = (findings || []).filter(f => f && f.severity !== 'fail');
+  if (!safe.length) return '';
+  const items = safe.map(f => {
+    const sev = f.severity || 'info';
+    const label = [f.rule_id || f.id || 'semantic', f.message || f.reason || 'advisory'].filter(Boolean).join(' · ');
+    const detail = f.detail || f.evidence || f.suggestion || '';
+    return `<span class="semantic-finding ${escapeHtml(sev)}" title="${escapeHtml(detail || label)}"><span class="sid">${escapeHtml(f.rule_id || f.id || 'SEM')}</span> ${escapeHtml(f.message || f.reason || sev)}</span>`;
+  }).join('');
+  return `<div class="semantic-findings" aria-label="Semantic advisory findings">${items}</div>`;
+}
+
+function renderEvents(events, allEvents) {
+  const el = document.getElementById('events-list');
+  const recent = events.slice(-80).reverse();
+  el.innerHTML = recent.map(ev => {
+    const hasV = ev.violations && ev.violations.length > 0;
+    const semanticHtml = renderSemanticFindings(ev.semantic_findings);
+    const hasSemantic = !!semanticHtml;
+    const tools = (ev.tools_used||[]).map(t => `<span>${escapeHtml(t)}</span>`).join('');
+    const total = tokenTotal(ev.tokens);
+    const tok = ev.tokens ? `<span class="tok">${tokenLabel(total)} tok</span><span class="tok-detail">in ${tokenLabel(ev.tokens.input||0)} · out ${tokenLabel(ev.tokens.output||0)}${ev.tokens.cached ? ' · cached '+tokenLabel(ev.tokens.cached) : ''}</span>` : '';
+    const tid = ev.task_id || '__no_task__';
+    const title = taskTitleFromEvents(allEvents || events, tid);
+    return `<div class="event${hasV?' has-violation':''}${hasSemantic?' has-semantic':''}">
+      <div class="meta"><span>T${ev.turn} · <span class="task-title">${escapeHtml(title)}</span></span><span class="task-id-mini">${escapeHtml(shortTaskMeta(tid))}</span><span>${escapeHtml(ev.timestamp||'')}</span><span>${escapeHtml(ev.model||'')}</span>${tok}</div>
+      <div class="summary">${escapeHtml(ev.summary||'')}</div>
+      ${tools ? '<div class="tools">'+tools+'</div>' : ''}
+      ${semanticHtml}
+    </div>`;
+  }).join('');
+}
+
+function taskViolations(taskEvents) {
+  return taskEvents.flatMap(ev => (ev.violations || []).map(v => ({...v, turn: ev.turn, time: ev.timestamp})));
+}
+
+function taskSubagents(taskEvents) {
+  return taskEvents.filter(ev => ev.subagent).map(ev => ({...ev.subagent, turn: ev.turn}));
+}
+
+function renderViolations(violations) {
+  const el = document.getElementById('violations-list');
+  if (!violations.length) { el.innerHTML = '<span style="color:var(--text-dim);font-size:13px">暂无违规</span>'; return; }
+  el.innerHTML = violations.slice(-50).reverse().map(v => {
+    const detail = v.detail || v.reason || '';
+    const tools = (v.tool_calls || v.tools || []);
+    const toolsHtml = tools.length ? '<div style="margin-top:4px"><b>Tools:</b> ' + tools.join(', ') + '</div>' : '';
+    return `<div class="violation" onclick="this.classList.toggle('expanded')"><span class="vid">${v.id} — ${v.name}</span> <span class="vdetail">Turn ${v.turn} @ ${v.time}</span><div class="v-detail-body">${detail}${toolsHtml}</div></div>`;
+  }).join('');
+}
+
+function renderSubagents(subagents) {
+  const el = document.getElementById('subagents-list');
+  if (!subagents.length) { el.innerHTML = '<span style="color:var(--text-dim);font-size:13px">暂无记录</span>'; return; }
+  el.innerHTML = subagents.slice(-30).reverse().map(s => {
+    const name = s.task_name || s.name || '—';
+    const pid = s.pid ? `PID ${s.pid}` : '';
+    const status = s.status || '';
+    const dur = s.duration ? `${s.duration}s` : '';
+    const meta = [pid, status, dur].filter(Boolean).join(' · ');
+    return `<div class="subagent-entry">Turn ${s.turn} — <b>${name}</b>${meta ? '<div class="sa-meta">'+meta+'</div>' : ''}</div>`;
+  }).join('');
+}
+
+
+function updateTopbar(ev, taskEvents, violations) {
+  const taskTurns = taskEvents.length;
+  const taskTokens = taskEvents.reduce((sum, item) => sum + tokenTotal(item.tokens), 0);
+  const latestWithModel = [...taskEvents].reverse().find(item => item.model);
+  document.getElementById('lbl-turn').textContent = taskTurns;
+  document.getElementById('lbl-model').textContent = (latestWithModel && latestWithModel.model) || ev.model || '—';
+  document.getElementById('lbl-tokens').textContent = taskTokens.toLocaleString();
+  const bpct = ev.budget?.used_pct || 0;
+  document.getElementById('lbl-budget').textContent = Math.round(bpct) + '%';
+  const fill = document.getElementById('budget-fill');
+  fill.style.width = Math.min(bpct, 100) + '%';
+  fill.className = 'fill' + (bpct > 80 ? ' danger' : bpct > 50 ? ' warn' : '');
+  const vcount = violations.length;
+  const vlbl = document.getElementById('lbl-violations');
+  vlbl.textContent = vcount;
+  vlbl.style.color = vcount > 0 ? 'var(--red)' : 'var(--green)';
+  document.getElementById('dot-status').className = 'dot dot-green';
+  document.getElementById('lbl-status').textContent = '运行中';
+  document.getElementById('lbl-updated').textContent = '更新: ' + new Date().toLocaleTimeString();
+}
+
+function updateGovernanceBar(taskEvents, violations, latestChecks) {
+  // 通过率
+  const checks = latestChecks || [];
+  const evaluated = checks.filter(c => c.status === 'pass' || c.status === 'fail');
+  const passed = evaluated.filter(c => c.status === 'pass').length;
+  const rate = evaluated.length ? Math.round(passed / evaluated.length * 100) : 100;
+  const rateEl = document.getElementById('gov-pass-rate');
+  rateEl.textContent = rate + '%';
+  rateEl.className = 'gov-value ' + (rate >= 90 ? 'green' : rate >= 70 ? 'yellow' : 'red');
+  // 违规数
+  const vEl = document.getElementById('gov-violations');
+  vEl.textContent = violations.length;
+  vEl.className = 'gov-value ' + (violations.length === 0 ? 'green' : violations.length <= 2 ? 'yellow' : 'red');
+  // 风险等级
+  const riskEl = document.getElementById('gov-risk');
+  let risk, riskCls;
+  if (violations.length === 0 && rate >= 90) { risk = '🟢 低'; riskCls = 'green'; }
+  else if (violations.length <= 2 && rate >= 70) { risk = '🟡 中'; riskCls = 'yellow'; }
+  else { risk = '🔴 高'; riskCls = 'red'; }
+  riskEl.textContent = risk;
+  riskEl.className = 'gov-value ' + riskCls;
+  // 连续安全轮
+  let streak = 0;
+  for (let i = taskEvents.length - 1; i >= 0; i--) {
+    if (!taskEvents[i].violations || taskEvents[i].violations.length === 0) streak++;
+    else break;
+  }
+  const sEl = document.getElementById('gov-safe-streak');
+  sEl.textContent = streak;
+  sEl.className = 'gov-value ' + (streak >= 5 ? 'green' : streak >= 2 ? 'yellow' : 'red');
+}
+
+function renderDashboard(events, registry, force=false) {
+  if (!events || !events.length) {
+    document.getElementById('lbl-status').textContent = '等待数据';
+    document.getElementById('dot-status').className = 'dot dot-yellow';
+    return;
+  }
+  const latest = events[events.length - 1];
+  const taskEvents = selectedEvents(events);
+  const signature = [events.length, viewMode, selectedTaskId, taskEvents.length, latest.timestamp || '', latest.summary || ''].join('|');
+  if (!force && signature === lastSignature) return;
+  lastSignature = signature;
+  lastLen = events.length;
+  const violations = taskViolations(taskEvents);
+  const subagents = taskSubagents(taskEvents);
+  const latestTaskEvent = taskEvents[taskEvents.length - 1] || latest;
+  renderTaskControls(events, taskEvents);
+  renderConstraints(registry, latestTaskEvent.constraint_checks);
+  renderEvents(taskEvents, events);
+  renderViolations(violations);
+  renderSubagents(subagents);
+  updateTopbar(latestTaskEvent, taskEvents, violations);
+  updateGovernanceBar(taskEvents, violations, latestTaskEvent.constraint_checks);
+}
+
+async function poll() {
+  const events = await fetchJSON('audit_log.json');
+  const registry = await fetchJSON('constraints_snapshot.json') || {constraints:[], rules:[]};
+  cachedEvents = events || [];
+  cachedRegistry = registry;
+  renderDashboard(cachedEvents, cachedRegistry);
+}
+
+async function requestStopGA() {
+  const btn = document.getElementById('btn-stop-ga');
+  if (!confirm('确认请求 GA 停止当前任务？\n这会调用 GA 原生 abort()，不会 kill 进程。')) return;
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = '请求停止中...';
+  try {
+    const r = await fetch('http://127.0.0.1:8766/api/stop', { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.error || r.statusText);
+    btn.textContent = '已请求停止';
+    document.getElementById('lbl-status').textContent = '已发送停止请求';
+    document.getElementById('dot-status').className = 'dot dot-yellow';
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = oldText;
+    alert('停止请求失败：' + e.message + '\n请确认 GA 已加载 ga_audit.install(agent)，控制端口 8766 已启动。');
+  }
+}
+
+// Init: render empty constraints from snapshot
+(async () => {
+  const reg = await fetchJSON('constraints_snapshot.json');
+  if (reg) renderConstraints(reg, []);
+})();
+document.getElementById('btn-stop-ga').addEventListener('click', requestStopGA);
+document.getElementById('view-mode').addEventListener('change', (e) => {
+  viewMode = e.target.value;
+  if (viewMode === 'selected' && !selectedTaskId) selectedTaskId = document.getElementById('task-select').value;
+  renderDashboard(cachedEvents, cachedRegistry, true);
+});
+document.getElementById('task-select').addEventListener('change', (e) => {
+  selectedTaskId = e.target.value;
+  viewMode = 'selected';
+  document.getElementById('view-mode').value = viewMode;
+  renderDashboard(cachedEvents, cachedRegistry, true);
+});
+setInterval(poll, POLL_MS);
+poll();
+</script>
+</body>
+</html>
