@@ -6,7 +6,7 @@ Usage:
 """
 import json, os, re, time, threading, uuid
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).parent
@@ -20,8 +20,10 @@ _registry_cache = None
 _registry_mtime = 0
 _agent_ref = None
 _control_server = None
+_dashboard_server = None
 _CONTROL_HOST = "127.0.0.1"
 _CONTROL_PORT = 8766
+_DASHBOARD_PORT = 8765
 
 
 def _new_task_id(source="user"):
@@ -244,27 +246,30 @@ def _first_value(*values):
 
 def _extract_model(ctx, ga_self, response):
     """Best-effort model extraction across GA/SDK response shapes."""
-    parent = _get_nested(ga_self, ["parent"])
-    parent_model = ""
     try:
-        if parent and hasattr(parent, "get_llm_name"):
-            parent_model = parent.get_llm_name(model=True)
-    except Exception:
+        parent = _get_nested(ga_self, ["parent"])
         parent_model = ""
-    return _first_value(
-        ctx.get("model"),
-        _get_nested(response, ["model"]),
-        _get_nested(response, ["response", "model"]),
-        getattr(ga_self, "_last_model", "") if ga_self else "",
-        getattr(ga_self, "model", "") if ga_self else "",
-        _get_nested(ga_self, ["parent", "model"]),
-        parent_model,
-        _get_nested(parent, ["llmclient", "model"]),
-        _get_nested(parent, ["llmclient", "model_name"]),
-        _get_nested(parent, ["llmclient", "default_model"]),
-        _get_nested(ga_self, ["llm", "model"]),
-        _get_nested(ga_self, ["client", "model"]),
-    )
+        try:
+            if parent and hasattr(parent, "get_llm_name"):
+                parent_model = parent.get_llm_name(model=True)
+        except Exception:
+            parent_model = ""
+        return _first_value(
+            ctx.get("model"),
+            _get_nested(response, ["model"]),
+            _get_nested(response, ["response", "model"]),
+            getattr(ga_self, "_last_model", "") if ga_self else "",
+            getattr(ga_self, "model", "") if ga_self else "",
+            _get_nested(ga_self, ["parent", "model"]),
+            parent_model,
+            _get_nested(parent, ["llmclient", "model"]),
+            _get_nested(parent, ["llmclient", "model_name"]),
+            _get_nested(parent, ["llmclient", "default_model"]),
+            _get_nested(ga_self, ["llm", "model"]),
+            _get_nested(ga_self, ["client", "model"]),
+        )
+    except Exception:
+        return ""
 
 
 def _extract_tokens(ctx, response):
@@ -703,6 +708,23 @@ def _ensure_control_server():
         return False
 
 
+def _ensure_dashboard_server():
+    """Start a static file server on _DASHBOARD_PORT to serve dashboard assets."""
+    global _dashboard_server
+    if _dashboard_server is not None:
+        return True
+    try:
+        handler = lambda *args, **kw: SimpleHTTPRequestHandler(
+            *args, directory=str(_DASHBOARD_DIR), **kw
+        )
+        _dashboard_server = ThreadingHTTPServer((_CONTROL_HOST, _DASHBOARD_PORT), handler)
+        t = threading.Thread(target=_dashboard_server.serve_forever, name="ga-audit-dashboard", daemon=True)
+        t.start()
+        return True
+    except OSError:
+        return False
+
+
 _orig_install = install
 
 def install(agent):
@@ -712,4 +734,5 @@ def install(agent):
     _install_task_id_hook(agent)
     ok = _orig_install(agent)
     _ensure_control_server()
+    _ensure_dashboard_server()
     return ok
