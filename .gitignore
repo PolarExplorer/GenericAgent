@@ -102,3 +102,7 @@ reflect/*
 
 # Universal: never track __pycache__ anywhere
 **/__pycache__/
+
+# Local generated backups
+*.bak_*
+*.mvp*_backup
