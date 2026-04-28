@@ -1121,9 +1121,12 @@ def _append_event(event):
 
 def install(agent):
     """Install audit hook on a GeneraticAgent instance. Zero-invasive."""
+    global _agent_ref
+    _agent_ref = agent
     if not hasattr(agent, '_turn_end_hooks'):
         agent._turn_end_hooks = {}
     agent._turn_end_hooks['ga_audit'] = _on_turn_end
+    _install_task_id_hook(agent)
     # Detect subagent tool availability
     global _SUBAGENT_AVAILABLE
     _sa_names = {"subagent", "dispatch", "delegate", "sub_agent"}

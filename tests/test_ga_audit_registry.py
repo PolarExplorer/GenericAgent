@@ -8,6 +8,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 import json
+import queue
 import tempfile
 import shutil
 
@@ -195,6 +196,8 @@ class OnTurnEndR061Test(unittest.TestCase):
             pass
         self._orig_dir = ga_audit._DASHBOARD_DIR
         self._orig_log = ga_audit._AUDIT_LOG_PATH
+        self._orig_agent_ref = ga_audit._agent_ref
+        self._orig_subagent_available = ga_audit._SUBAGENT_AVAILABLE
         self._tmp = tempfile.mkdtemp()
         import pathlib
         ga_audit._DASHBOARD_DIR = pathlib.Path(self._tmp)
@@ -204,6 +207,8 @@ class OnTurnEndR061Test(unittest.TestCase):
         import ga_audit
         ga_audit._DASHBOARD_DIR = self._orig_dir
         ga_audit._AUDIT_LOG_PATH = self._orig_log
+        ga_audit._agent_ref = self._orig_agent_ref
+        ga_audit._SUBAGENT_AVAILABLE = self._orig_subagent_available
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def _last_event(self):
@@ -213,6 +218,31 @@ class OnTurnEndR061Test(unittest.TestCase):
             return None
         events = json.loads(log_path.read_text(encoding="utf-8"))
         return events[-1] if events else None
+
+    def test_install_assigns_task_id_to_turn_events(self):
+        """install() wires put_task/get hooks so turn events carry the active task_id."""
+        import ga_audit
+
+        class DummyAgent:
+            def __init__(self):
+                self.task_queue = queue.Queue()
+
+            def put_task(self, text, source="user", images=None):
+                display_queue = queue.Queue()
+                self.task_queue.put({"text": text, "source": source, "images": images, "output": display_queue})
+                return display_queue
+
+        agent = DummyAgent()
+        self.assertTrue(ga_audit.install(agent))
+        agent.put_task("check monitor panel", source="user")
+        item = agent.task_queue.get()
+        self.assertIn("task_id", item)
+        self.assertTrue(item["task_id"])
+
+        agent._turn_end_hooks["ga_audit"]({"turn": 1, "summary": "", "tool_calls": []})
+        event = self._last_event()
+        self.assertIsNotNone(event, "No event in audit log")
+        self.assertEqual(item["task_id"], event.get("task_id"))
 
     def test_r061_soft_block_via_on_turn_end(self):
         """3 consecutive task_exec turns without subagent → R061 soft_block in audit log."""
