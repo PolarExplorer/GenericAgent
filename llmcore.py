@@ -80,45 +80,102 @@ def safeprint(*argv):
     except OSError: pass
 print = safeprint
 
+def _message_text_for_digest(msg, max_len=900):
+    """Extract compact plain text from a history message without preserving tool links."""
+    parts = []
+    content = msg.get('content', '')
+    if isinstance(content, str): parts.append(content)
+    elif isinstance(content, list):
+        for b in content:
+            if not isinstance(b, dict): continue
+            t = b.get('type')
+            if t == 'text': parts.append(b.get('text', ''))
+            elif t == 'tool_use':
+                name = b.get('name') or b.get('input', {}).get('name') or 'tool'
+                parts.append(f"[tool_use:{name}] {json.dumps(b.get('input', {}), ensure_ascii=False)[:max_len]}")
+            elif t == 'tool_result':
+                c = b.get('content', '')
+                if isinstance(c, list): c = '\n'.join(x.get('text', '') for x in c if isinstance(x, dict))
+                parts.append(f"[tool_result] {c}")
+    text = '\n'.join(str(p) for p in parts if p)
+    text = re.sub(r'<(thinking|think)>[\s\S]*?</\1>', '<thinking>[...]</thinking>', text)
+    text = re.sub(r'<(history|key_info)>[\s\S]*?</\1>', lambda m: f'<{m.group(1)}>[...]</{m.group(1)}>', text)
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text[:max_len//2] + '\n...[Truncated]...\n' + text[-max_len//2:] if len(text) > max_len else text
+
+
+def _compact_history_prefix(history, target, keep_recent=8):
+    """Replace old history prefix with one plain-text digest while keeping recent raw turns."""
+    if len(history) <= keep_recent + 2: return False
+    split = max(1, len(history) - keep_recent)
+    while split < len(history) and history[split].get('role') != 'user': split += 1
+    if split >= len(history) - 2: return False
+    old, recent = history[:split], history[split:]
+    budget = max(1200, min(12000, int(target * 0.20)))
+    per_msg = max(160, min(900, budget // max(1, len(old))))
+    lines = ["[GA_CONTEXT_DIGEST] Older conversation was compacted to reduce repeated input tokens. Preserve these facts, decisions, constraints, and evidence references; recent raw messages follow."]
+    for idx, msg in enumerate(old, 1):
+        text = _message_text_for_digest(msg, per_msg)
+        if text: lines.append(f"{idx}. {msg.get('role','?')}: {text}")
+    digest = '\n'.join(lines)
+    compacted = {"role": "user", "content": [{"type": "text", "text": digest}]}
+    before = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
+    history[:] = [compacted] + recent
+    after = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
+    print(f'[Debug] Compacted history prefix: {before} -> {after} chars, {len(old)} msgs -> digest.')
+    return after < before
+
+
+def _cleanup_history_tool_boundaries(history):
+    # Post-trim orphan cleanup: remove orphaned assistant(tool_use) at boundary
+    if history:
+        i = 0
+        while i < len(history) - 1:
+            m = history[i]
+            if m.get('role') == 'assistant':
+                content = m.get('content', [])
+                has_tool_use = any(isinstance(b, dict) and b.get('type') == 'tool_use' for b in content) if isinstance(content, list) else False
+                if has_tool_use:
+                    # Check if next message has matching tool_results
+                    nxt = history[i + 1]
+                    if nxt.get('role') != 'user':
+                        history.pop(i); continue
+                    nxt_content = nxt.get('content', [])
+                    if isinstance(nxt_content, list):
+                        result_ids = {b.get('tool_use_id') for b in nxt_content if isinstance(b, dict) and b.get('type') == 'tool_result'}
+                        use_ids = {b.get('id') for b in content if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('id')}
+                        if not result_ids.intersection(use_ids):
+                            history.pop(i)
+                            # Also strip orphaned tool_result blocks from the now-exposed user msg
+                            if i < len(history) and history[i].get('role') == 'user':
+                                uc = history[i].get('content', [])
+                                if isinstance(uc, list):
+                                    cleaned = [b for b in uc if not (isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') in use_ids)]
+                                    if cleaned != uc: history[i] = {**history[i], 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
+                            continue
+            i += 1
+
+
 def trim_messages_history(history, context_win):
     compress_history_tags(history)
     cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history) 
     print(f'[Debug] Current context: {cost} chars, {len(history)} messages.')
     if cost > context_win * 3: 
         compress_history_tags(history, keep_recent=4, force=True)   # trim breaks cache, so compress more btw
+        cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
         target = context_win * 3 * 0.6
+        if cost > target: _compact_history_prefix(history, target, keep_recent=8)
+        cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
         while len(history) > 5 and cost > target:
-            history.pop(0)
+            if history and '[GA_CONTEXT_DIGEST]' in json.dumps(history[0], ensure_ascii=False):
+                history.pop(1)  # keep digest; drop the oldest raw message after it
+            else:
+                history.pop(0)
             while history and history[0].get('role') != 'user': history.pop(0)
             if history and history[0].get('role') == 'user': history[0] = _sanitize_leading_user_msg(history[0])
             cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
-        # Post-trim orphan cleanup: remove orphaned assistant(tool_use) at boundary
-        if history:
-            i = 0
-            while i < len(history) - 1:
-                m = history[i]
-                if m.get('role') == 'assistant':
-                    content = m.get('content', [])
-                    has_tool_use = any(isinstance(b, dict) and b.get('type') == 'tool_use' for b in content) if isinstance(content, list) else False
-                    if has_tool_use:
-                        # Check if next message has matching tool_results
-                        nxt = history[i + 1]
-                        if nxt.get('role') != 'user':
-                            history.pop(i); continue
-                        nxt_content = nxt.get('content', [])
-                        if isinstance(nxt_content, list):
-                            result_ids = {b.get('tool_use_id') for b in nxt_content if isinstance(b, dict) and b.get('type') == 'tool_result'}
-                            use_ids = {b.get('id') for b in content if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('id')}
-                            if not result_ids.intersection(use_ids):
-                                history.pop(i)
-                                # Also strip orphaned tool_result blocks from the now-exposed user msg
-                                if i < len(history) and history[i].get('role') == 'user':
-                                    uc = history[i].get('content', [])
-                                    if isinstance(uc, list):
-                                        cleaned = [b for b in uc if not (isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') in use_ids)]
-                                        if cleaned != uc: history[i] = {**history[i], 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
-                                continue
-                i += 1
+        _cleanup_history_tool_boundaries(history)
+        cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
         print(f'[Debug] Trimmed context, current: {cost} chars, {len(history)} messages.')
 
 def auto_make_url(base, path):
