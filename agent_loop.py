@@ -1,6 +1,10 @@
 import json, re, os
 from dataclasses import dataclass
 from typing import Any, Optional
+try:
+    from ga_audit import preview_r061_pre_tool_guard
+except Exception:
+    preview_r061_pre_tool_guard = None
 @dataclass
 class StepOutcome:
     data: Any
@@ -61,6 +65,12 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema, 
         if not response.tool_calls: tool_calls = [{'tool_name': 'no_tool', 'args': {}}]
         else: tool_calls = [{'tool_name': tc.function.name, 'args': json.loads(tc.function.arguments), 'id': tc.id}
                           for tc in response.tool_calls]
+        if preview_r061_pre_tool_guard:
+            guard = preview_r061_pre_tool_guard(tool_calls)
+            if guard:
+                yield (f"⚠️ R061 dry-run {guard['severity']}: "
+                       f"consecutive_exec_turns={guard['consecutive_exec_turns']}; "
+                       f"recommended_action={guard['recommended_action']}\n\n")
        
         tool_results = []; next_prompts = set(); exit_reason = {}
         for ii, tc in enumerate(tool_calls):

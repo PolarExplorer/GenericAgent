@@ -37,6 +37,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .constraint .cid { color: var(--text-dim); font-size: 11px; }
 .constraint .cname { color: var(--text); }
 .constraint .cstatus { float: right; font-size: 11px; font-weight: 600; }
+.constraint .cdetail { margin-top: 4px; color: var(--text-dim); font-size: 11px; line-height: 1.35; word-break: break-word; }
+.constraint .cbadge { display: inline-block; margin-right: 6px; padding: 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: #1f2937; color: var(--text-dim); font-size: 10px; font-weight: 700; }
+.constraint .cbadge.soft_block { border-color: #7a5a16; color: #ffd98a; background: #2a2111; }
+.constraint .cbadge.hard_block { border-color: #7d2b2b; color: #ffb4b4; background: #2a1111; }
 .cstatus.pass { color: var(--green); }
 .cstatus.fail { color: var(--red); }
 .cstatus.skip { color: var(--text-dim); }
@@ -113,7 +117,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
       <span>Budget: <span class="budget-bar"><span class="fill" id="budget-fill" style="width:0%"></span></span> <b id="lbl-budget">0%</b></span>
       <span>Violations: <b id="lbl-violations" style="color:var(--green)">0</b></span>
       <span style="color:var(--text-dim);font-size:11px" id="lbl-updated">—</span>
-      <span class="controls"><button class="btn btn-danger" id="btn-stop-ga" title="调用 GA 原生 abort()，不 kill 进程">停止 GA</button></span>
+      <span class="controls"><button class="btn" id="btn-reload-ga" title="调用 /api/reload 重新加载 ga_audit.py">Reload</button><button class="btn btn-danger" id="btn-stop-ga" title="调用 GA 原生 abort()，不 kill 进程">停止 GA</button></span>
     </div>
   </div>
   <div class="governance-bar" id="governance-bar">
@@ -174,12 +178,23 @@ function renderConstraints(registry, latestChecks) {
   const el = document.getElementById('constraints-list');
   const all = [...(registry.constraints||[]), ...(registry.rules||[])];
   const checkMap = {};
-  (latestChecks||[]).forEach(c => checkMap[c.id] = c.status);
+  (latestChecks||[]).forEach(c => checkMap[c.id] = c);
   el.innerHTML = all.map(item => {
-    const st = checkMap[item.id] || 'skip';
+    const check = checkMap[item.id] || {};
+    const st = check.status || 'skip';
     const label = {pass:'✓ PASS', fail:'✗ FAIL', skip:'— SKIP'}[st] || st;
-    return `<div class="constraint ${st}"><span class="cstatus ${st}">${label}</span><span class="cid">${item.id}</span> <span class="cname">${item.name}</span></div>`;
+    const detail = constraintDetailHtml(item, check);
+    return `<div class="constraint ${st}"><span class="cstatus ${st}">${label}</span><span class="cid">${escapeHtml(item.id)}</span> <span class="cname">${escapeHtml(item.name)}</span>${detail}</div>`;
   }).join('');
+}
+
+function constraintDetailHtml(item, check) {
+  if (!check || item.id !== 'R061') return '';
+  const parts = [];
+  if (check.severity) parts.push(`<span class="cbadge ${escapeHtml(check.severity)}">${escapeHtml(check.severity)}</span>`);
+  if (check.consecutive_exec_turns !== undefined) parts.push(`${escapeHtml(check.consecutive_exec_turns)} turns`);
+  if (check.recommended_action) parts.push(escapeHtml(check.recommended_action));
+  return parts.length ? `<div class="cdetail">${parts.join(' · ')}</div>` : '';
 }
 
 function tokenTotal(tokens) {
@@ -324,7 +339,20 @@ function renderEvents(events, allEvents) {
     const hasSemantic = !!semanticHtml;
     const tools = (ev.tools_used||[]).map(t => `<span>${escapeHtml(t)}</span>`).join('');
     const total = tokenTotal(ev.tokens);
-    const tok = ev.tokens ? `<span class="tok">${tokenLabel(total)} tok</span><span class="tok-detail">in ${tokenLabel(ev.tokens.input||0)} · out ${tokenLabel(ev.tokens.output||0)}${ev.tokens.cached ? ' · cached '+tokenLabel(ev.tokens.cached) : ''}</span>` : '';
+    const tb = ev.token_breakdown || {};
+    const cb = ev.context_breakdown || {};
+    const tokTitle = [
+      tb.prompt !== undefined ? `prompt ${tokenLabel(tb.prompt||0)}` : '',
+      tb.completion !== undefined ? `completion ${tokenLabel(tb.completion||0)}` : '',
+      tb.reasoning ? `reasoning ${tokenLabel(tb.reasoning)}` : '',
+      tb.cached ? `cached ${tokenLabel(tb.cached)}` : '',
+      tb.cache_creation ? `cache_write ${tokenLabel(tb.cache_creation)}` : '',
+      cb.history_messages !== undefined ? `history ${cb.history_messages} msgs / ${tokenLabel(cb.history_chars||0)} chars` : '',
+      cb.tools_schema_chars ? `tools ${cb.tools_count||0} / ${tokenLabel(cb.tools_schema_chars)} chars` : '',
+      cb.system_prompt_chars ? `system ${tokenLabel(cb.system_prompt_chars)} chars` : '',
+      cb.last_tool_result_chars ? `last_tool ${tokenLabel(cb.last_tool_result_chars)} chars` : ''
+    ].filter(Boolean).join('\n');
+    const tok = ev.tokens ? `<span class="tok" title="${escapeHtml(tokTitle)}">${tokenLabel(total)} tok</span><span class="tok-detail" title="${escapeHtml(tokTitle)}">in ${tokenLabel(ev.tokens.input||0)} · out ${tokenLabel(ev.tokens.output||0)}${ev.tokens.cached ? ' · cached '+tokenLabel(ev.tokens.cached) : ''}${tb.reasoning ? ' · reason '+tokenLabel(tb.reasoning) : ''}${cb.history_chars ? ' · hist '+tokenLabel(cb.history_chars)+'ch' : ''}</span>` : '';
     const tid = ev.task_id || '__no_task__';
     const title = taskTitleFromEvents(allEvents || events, tid);
     return `<div class="event${hasV?' has-violation':''}${hasSemantic?' has-semantic':''}">
@@ -350,9 +378,20 @@ function renderViolations(violations) {
   el.innerHTML = violations.slice(-50).reverse().map(v => {
     const detail = v.detail || v.reason || '';
     const tools = (v.tool_calls || v.tools || []);
-    const toolsHtml = tools.length ? '<div style="margin-top:4px"><b>Tools:</b> ' + tools.join(', ') + '</div>' : '';
-    return `<div class="violation" onclick="this.classList.toggle('expanded')"><span class="vid">${v.id} — ${v.name}</span> <span class="vdetail">Turn ${v.turn} @ ${v.time}</span><div class="v-detail-body">${detail}${toolsHtml}</div></div>`;
+    const toolNames = tools.map(t => typeof t === 'string' ? t : (t.name || t.tool || 'tool')).filter(Boolean);
+    const toolsHtml = toolNames.length ? '<div style="margin-top:4px"><b>Tools:</b> ' + escapeHtml(toolNames.join(', ')) + '</div>' : '';
+    const r061Html = r061ViolationDetailHtml(v);
+    return `<div class="violation" onclick="this.classList.toggle('expanded')"><span class="vid">${escapeHtml(v.id)} — ${escapeHtml(v.name)}</span> <span class="vdetail">Turn ${escapeHtml(v.turn)} @ ${escapeHtml(v.time)}</span><div class="v-detail-body">${escapeHtml(detail)}${r061Html}${toolsHtml}</div></div>`;
   }).join('');
+}
+
+function r061ViolationDetailHtml(v) {
+  if (!v || v.id !== 'R061') return '';
+  const rows = [];
+  if (v.severity) rows.push(`Severity: ${escapeHtml(v.severity)}`);
+  if (v.consecutive_exec_turns !== undefined) rows.push(`Consecutive exec turns: ${escapeHtml(v.consecutive_exec_turns)}`);
+  if (v.recommended_action) rows.push(`Recommended action: ${escapeHtml(v.recommended_action)}`);
+  return rows.length ? `<div>${rows.join('<br>')}</div>` : '';
 }
 
 function renderSubagents(subagents) {
@@ -454,6 +493,30 @@ async function poll() {
   renderDashboard(cachedEvents, cachedRegistry);
 }
 
+async function requestReloadGA() {
+  const btn = document.getElementById('btn-reload-ga');
+  const reloadUrl = 'http://127.0.0.1:8766/api/reload';
+  btn.disabled = true;
+  const oldText = btn.textContent;
+  btn.textContent = 'Reloading...';
+  try {
+    const r = await fetch(reloadUrl, { method: 'POST' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.error || r.statusText);
+    btn.textContent = data.reloaded ? 'Reloaded' : 'No change';
+    document.getElementById('lbl-status').textContent = '已 reload ga_audit.py';
+    document.getElementById('dot-status').className = 'dot dot-green';
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }, 1200);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = oldText;
+    alert('Reload 请求失败：' + e.message + '\n请确认控制端口 8766 已启动，且 /api/reload 可用。');
+  }
+}
+
 async function requestStopGA() {
   const modal = document.getElementById('stop-confirm-modal');
   const input = document.getElementById('stop-confirm-input');
@@ -495,6 +558,7 @@ async function confirmStopGA() {
   const reg = await fetchJSON('constraints_snapshot.json');
   if (reg) renderConstraints(reg, []);
 })();
+document.getElementById('btn-reload-ga').addEventListener('click', requestReloadGA);
 document.getElementById('btn-stop-ga').addEventListener('click', requestStopGA);
 document.getElementById('stop-confirm-cancel').addEventListener('click', () => {
   document.getElementById('stop-confirm-modal').style.display = 'none';

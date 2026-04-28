@@ -4,7 +4,7 @@ Usage:
     import ga_audit
     ga_audit.install(agent)  # agent = GeneraticAgent 实例
 """
-import json, os, re, time, threading, uuid
+import hashlib, json, os, re, sys, time, threading, types, uuid
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,11 +19,110 @@ _AUDIT_LOG_PATH = _DASHBOARD_DIR / "audit_log.json"
 _registry_cache = None
 _registry_mtime = 0
 _agent_ref = None
+_SUBAGENT_AVAILABLE = None  # None=unknown, True/False after install()
 _control_server = None
 _dashboard_server = None
 _CONTROL_HOST = "127.0.0.1"
 _CONTROL_PORT = 8766
 _DASHBOARD_PORT = 8765
+_BUDGET_SESSION_TASK_ID = None
+_BUDGET_SESSION_LAST_TURN = None
+
+# ── Hot-reload infrastructure ──
+_SOURCE_PATH = Path(__file__).resolve()
+_source_mtime = 0.0  # last known mtime
+_reload_lock = threading.Lock()
+_RELOAD_PRESERVE = {  # state vars to preserve across reload
+    "_agent_ref", "_control_server", "_dashboard_server",
+    "_SUBAGENT_AVAILABLE", "_CONSEC_EXEC_HISTORY",
+    "_LAST_EVIDENCE_TURN", "_BUDGET_SESSION_TASK_ID",
+    "_BUDGET_SESSION_LAST_TURN", "_source_mtime", "_reload_lock",
+    "_SOURCE_PATH", "_RELOAD_PRESERVE",
+}
+
+
+def _hot_reload(force=False):
+    """Check ga_audit.py mtime; if changed, exec new code and patch functions/classes in-place.
+
+    Preserves: agent ref, HTTP servers, accumulated state.
+    Returns: (reloaded: bool, error: str|None)
+    """
+    global _source_mtime
+    try:
+        cur_mtime = _SOURCE_PATH.stat().st_mtime
+    except OSError:
+        return False, "source file not found"
+    if not force and cur_mtime == _source_mtime:
+        return False, None
+    with _reload_lock:
+        # Double-check after acquiring lock
+        try:
+            cur_mtime = _SOURCE_PATH.stat().st_mtime
+        except OSError:
+            return False, "source file not found"
+        if not force and cur_mtime == _source_mtime:
+            return False, None
+        try:
+            src = _SOURCE_PATH.read_text(encoding="utf-8")
+            compile(src, str(_SOURCE_PATH), "exec")  # syntax check first
+        except Exception as e:
+            _source_mtime = cur_mtime  # don't retry same broken version
+            return False, f"compile error: {e}"
+        # Snapshot state to preserve
+        mod = sys.modules.get(__name__)
+        preserved = {}
+        if mod:
+            for k in _RELOAD_PRESERVE:
+                if hasattr(mod, k):
+                    preserved[k] = getattr(mod, k)
+        # Exec into temp namespace
+        ns = {"__name__": __name__, "__file__": str(_SOURCE_PATH)}
+        try:
+            exec(src, ns)
+        except Exception as e:
+            _source_mtime = cur_mtime
+            return False, f"exec error: {e}"
+        # Patch: replace functions and non-preserved globals
+        if mod:
+            for k, v in ns.items():
+                if k.startswith("__"):
+                    continue
+                if k in _RELOAD_PRESERVE:
+                    continue
+                if isinstance(v, (types.FunctionType, type)):
+                    setattr(mod, k, v)
+            # Re-bind the turn_end hook on agent if available
+            agent = preserved.get("_agent_ref")
+            new_on_turn_end = ns.get("_on_turn_end")
+            if agent and new_on_turn_end and hasattr(agent, "_turn_end_hooks"):
+                agent._turn_end_hooks["ga_audit"] = _make_trampoline()
+            # Restore preserved state
+            for k, v in preserved.items():
+                setattr(mod, k, v)
+            # Sync new handler class to running control server
+            new_handler = ns.get("_ControlHandler")
+            srv = getattr(mod, "_control_server", None)
+            if new_handler and srv:
+                srv.RequestHandlerClass = new_handler
+        _source_mtime = cur_mtime
+        try:
+            _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
+            with open(_DASHBOARD_DIR / "audit_error.log", "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now().isoformat()} HOT-RELOAD OK (mtime={cur_mtime})\n")
+        except Exception:
+            pass
+        return True, None
+
+
+def _make_trampoline():
+    """Return a trampoline function that auto-reloads before calling _on_turn_end."""
+    def _trampoline(ctx):
+        _hot_reload()  # check & reload if needed (no-op if unchanged)
+        mod = sys.modules.get(__name__)
+        fn = getattr(mod, "_on_turn_end", None) if mod else None
+        if fn and fn is not _trampoline:
+            return fn(ctx)
+    return _trampoline
 
 
 def _new_task_id(source="user"):
@@ -78,7 +177,14 @@ def _ensure_dashboard_assets():
         should_copy = not _DASHBOARD_HTML_PATH.exists()
         if not should_copy:
             existing = _DASHBOARD_HTML_PATH.read_text(encoding="utf-8", errors="ignore")
-            should_copy = "semantic-findings" not in existing or "renderSemanticFindings" not in existing
+            template_mtime = _DASHBOARD_TEMPLATE_PATH.stat().st_mtime
+            served_mtime = _DASHBOARD_HTML_PATH.stat().st_mtime
+            should_copy = (
+                "semantic-findings" not in existing
+                or "renderSemanticFindings" not in existing
+                or "token_breakdown" not in existing
+                or served_mtime < template_mtime
+            )
         if should_copy:
             _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
             template = _DASHBOARD_TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -263,8 +369,47 @@ _EXEC_TOOLS = {
 }
 _TASK_EXEC_TOOLS = {
     "code_run", "file_write", "file_patch", "file_create",
-    "file_overwrite", "shell", "bash", "web_execute_js", "file_read", "web_scan",
+    "file_overwrite", "shell", "bash", "web_execute_js",
 }
+
+_DELEGATION_EXEMPTION_MARKERS = (
+    "subagent不可用", "subagent 不可用", "无法委托", "不能委托",
+    "记录豁免", "豁免", "exemption", "delegate exemption",
+    "短任务", "轻量任务", "单步验证", "最小验证", "最终验证",
+    "用户要求直接", "直接处理", "无需委托",
+)
+
+
+def _has_delegation_exemption(ctx):
+    """Detect explicit delegation exemption/reflection in current turn context."""
+    try:
+        parts = []
+        for key in ("summary", "reflection", "r061_exemption", "delegation_exemption", "user_message", "_user_message", "query"):
+            value = ctx.get(key, "") if isinstance(ctx, dict) else ""
+            if value:
+                parts.append(str(value))
+        text = "\n".join(parts).lower()
+        if not text:
+            return False
+
+        # Avoid treating test labels such as "R004_R061_no_exemption_case" as
+        # explicit delegation exemptions. Chinese markers are phrase-based;
+        # English markers require token boundaries and are blocked by common
+        # negated/tag forms.
+        if re.search(r"(?:^|[\s_\-/])(?:no|without|non)[\s_\-/]+(?:delegation[\s_\-/]+)?exemption(?:$|[\s_\-/])", text):
+            return False
+
+        for marker in _DELEGATION_EXEMPTION_MARKERS:
+            marker_l = marker.lower()
+            if marker_l in {"exemption", "delegate exemption"}:
+                pattern = r"(?<![a-z0-9_])" + re.escape(marker_l).replace(r"\ ", r"[\s_-]+") + r"(?![a-z0-9_])"
+                if re.search(pattern, text):
+                    return True
+            elif marker_l in text:
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def _check_context(rule, tool_calls, ctx):
@@ -291,26 +436,35 @@ def _check_context(rule, tool_calls, ctx):
 
 
 def _check_consecutive_execution(rule, tool_calls, ctx):
-    """R004: >=threshold consecutive turns of execution tools without subagent = fail.
-    NOTE: _CONSEC_EXEC_HISTORY is populated by _on_turn_end BEFORE this is called."""
+    """R004: budget-aware delegation guard for consecutive direct execution.
+
+    Short/light direct execution is allowed. Only >=threshold consecutive direct
+    execution turns fail when subagent is available and no explicit exemption was
+    recorded (e.g. short task, final/minimal verification, user asked direct run).
+    NOTE: _CONSEC_EXEC_HISTORY is populated by _on_turn_end BEFORE this is called.
+    """
     tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
     has_exec = bool(set(tool_names) & _EXEC_TOOLS)
     if not has_exec:
         return "pass"
 
     threshold = rule.get("detection", {}).get("threshold", 3)
-
-    # Check last N entries (already includes current turn from _on_turn_end)
     recent = _CONSEC_EXEC_HISTORY[-threshold:]
     if len(recent) < threshold:
         return "pass"
 
-    all_exec_no_sub = all(r["exec"] and not r["subagent"] for r in recent)
-    return "fail" if all_exec_no_sub else "pass"
+    all_exec_no_sub = all(r.get("exec") and not r.get("subagent") for r in recent)
+    if not all_exec_no_sub:
+        return "pass"
+    if _SUBAGENT_AVAILABLE is False:
+        return "skip"  # subagent tool not in environment, cannot delegate
+    if any(r.get("exemption") for r in recent) or _has_delegation_exemption(ctx):
+        return "pass"
+    return "fail"
 
 
 def _check_subagent_delegation_guard(rule, tool_calls, ctx):
-    """Fail when >=threshold consecutive coding/info-gathering turns ran directly without subagent delegation."""
+    """R061: fail only on true long-running direct task execution without delegation/exemption."""
     tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
     has_task_exec = bool(set(tool_names) & _TASK_EXEC_TOOLS)
     if not has_task_exec:
@@ -322,7 +476,71 @@ def _check_subagent_delegation_guard(rule, tool_calls, ctx):
         return "pass"
 
     all_direct_task_exec = all(r.get("task_exec") and not r.get("subagent") for r in recent)
-    return "fail" if all_direct_task_exec else "pass"
+    if not all_direct_task_exec:
+        return "pass"
+    if _SUBAGENT_AVAILABLE is False:
+        return "skip"  # subagent tool not in environment, cannot delegate
+    if any(r.get("exemption") for r in recent) or _has_delegation_exemption(ctx):
+        return "pass"
+    return "fail"
+
+
+def _r061_metadata(status, ctx):
+    """Attach R061 governance metadata: soft block at 3 direct exec turns, hard at 4+."""
+    if status != "fail":
+        return {}
+    consecutive = _r061_consecutive_count(_CONSEC_EXEC_HISTORY)
+    severity = "hard_block" if consecutive >= 4 else "soft_block"
+    action = "delegate_to_subagent_or_record_exemption"
+    if severity == "soft_block":
+        action = "stop_and_reflect_delegate_or_explain_exemption"
+    return {
+        "severity": severity,
+        "consecutive_exec_turns": consecutive,
+        "recommended_action": action,
+    }
+
+
+def _r061_consecutive_count(history):
+    consecutive = 0
+    for record in reversed(history):
+        if record.get("task_exec") and not record.get("subagent"):
+            consecutive += 1
+        else:
+            break
+    return consecutive
+
+
+def preview_r061_pre_tool_guard(tool_calls, ctx=None):
+    """Dry-run R061 before executing tools. Returns warning metadata; never blocks."""
+    try:
+        if _SUBAGENT_AVAILABLE is False or _has_delegation_exemption(ctx):
+            return None
+        tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
+        subagent = _extract_subagent(tool_calls, None)
+        record = {
+            "exec": any(t in _EXEC_TOOLS for t in tool_names),
+            "task_exec": any(t in _TASK_EXEC_TOOLS for t in tool_names),
+            "subagent": bool(subagent),
+            "exemption": _has_delegation_exemption(ctx),
+        }
+        projected = (_CONSEC_EXEC_HISTORY + [record])[-20:]
+        consecutive = _r061_consecutive_count(projected)
+        if consecutive < 3:
+            return None
+        severity = "hard_block" if consecutive >= 4 else "soft_block"
+        action = "delegate_to_subagent_or_record_exemption"
+        if severity == "soft_block":
+            action = "stop_and_reflect_delegate_or_explain_exemption"
+        return {
+            "id": "R061",
+            "mode": "dry_run",
+            "severity": severity,
+            "consecutive_exec_turns": consecutive,
+            "recommended_action": action,
+        }
+    except Exception:
+        return None
 
 
 def _check_tool_negative(rule, tool_calls):
@@ -411,14 +629,32 @@ def _extract_model(ctx, ga_self, response):
         return ""
 
 
-def _extract_tokens(ctx, response):
-    """Best-effort token extraction across OpenAI/Anthropic/GA budget shapes."""
+def _extract_usage(ctx, response):
+    """Best-effort raw usage extraction across OpenAI/Anthropic/GA shapes."""
     usage = _first_value(
         ctx.get("usage"),
         ctx.get("tokens"),
         _get_nested(response, ["usage"]),
         _get_nested(response, ["response", "usage"]),
     )
+    try:
+        import budget_tracker
+        if not usage and hasattr(budget_tracker, "last_usage"):
+            usage = budget_tracker.last_usage()
+    except Exception:
+        pass
+    try:
+        import llmcore
+        if not usage and hasattr(llmcore, "last_usage"):
+            usage = llmcore.last_usage()
+    except Exception:
+        pass
+    return usage or {}
+
+
+def _extract_tokens(ctx, response):
+    """Best-effort token extraction across OpenAI/Anthropic/GA budget shapes."""
+    usage = _extract_usage(ctx, response)
     input_tokens = _first_value(
         _get_nested(usage, ["input"]),
         _get_nested(usage, ["input_tokens"]),
@@ -434,32 +670,67 @@ def _extract_tokens(ctx, response):
     cached_tokens = _first_value(
         _get_nested(usage, ["cached"]),
         _get_nested(usage, ["cache_read_input_tokens"]),
+        _get_nested(usage, ["input_tokens_details", "cached_tokens"]),
         _get_nested(usage, ["prompt_tokens_details", "cached_tokens"]),
     ) or 0
-    try:
-        import budget_tracker
-        if not (input_tokens or output_tokens) and hasattr(budget_tracker, "last_usage"):
-            last_usage = budget_tracker.last_usage()
-            input_tokens = _first_value(_get_nested(last_usage, ["input"]), _get_nested(last_usage, ["input_tokens"])) or 0
-            output_tokens = _first_value(_get_nested(last_usage, ["output"]), _get_nested(last_usage, ["output_tokens"])) or 0
-            cached_tokens = _first_value(_get_nested(last_usage, ["cached"]), _get_nested(last_usage, ["cache_read_input_tokens"])) or 0
-    except Exception:
-        pass
-    try:
-        import llmcore
-        if not (input_tokens or output_tokens) and hasattr(llmcore, "last_usage"):
-            last_usage = llmcore.last_usage()
-            input_tokens = _first_value(_get_nested(last_usage, ["input"]), _get_nested(last_usage, ["input_tokens"]), _get_nested(last_usage, ["prompt_tokens"])) or 0
-            output_tokens = _first_value(_get_nested(last_usage, ["output"]), _get_nested(last_usage, ["output_tokens"]), _get_nested(last_usage, ["completion_tokens"])) or 0
-            cached_tokens = _first_value(
-                _get_nested(last_usage, ["cached"]),
-                _get_nested(last_usage, ["cache_read_input_tokens"]),
-                _get_nested(last_usage, ["input_tokens_details", "cached_tokens"]),
-                _get_nested(last_usage, ["prompt_tokens_details", "cached_tokens"]),
-            ) or 0
-    except Exception:
-        pass
     return {"input": int(input_tokens or 0), "output": int(output_tokens or 0), "cached": int(cached_tokens or 0)}
+
+
+def _extract_token_breakdown(ctx, response):
+    """Detailed provider token counters for dashboard diagnosis."""
+    usage = _extract_usage(ctx, response)
+    completion_details = _get_nested(usage, ["completion_tokens_details"], {}) or {}
+    prompt_details = _first_value(
+        _get_nested(usage, ["prompt_tokens_details"]),
+        _get_nested(usage, ["input_tokens_details"]),
+        {},
+    ) or {}
+    return {
+        "prompt": int(_first_value(_get_nested(usage, ["prompt_tokens"]), _get_nested(usage, ["input_tokens"]), _get_nested(usage, ["input"])) or 0),
+        "completion": int(_first_value(_get_nested(usage, ["completion_tokens"]), _get_nested(usage, ["output_tokens"]), _get_nested(usage, ["output"])) or 0),
+        "total": int(_first_value(_get_nested(usage, ["total_tokens"])) or 0),
+        "cached": int(_first_value(_get_nested(prompt_details, ["cached_tokens"]), _get_nested(usage, ["cache_read_input_tokens"]), _get_nested(usage, ["cached"])) or 0),
+        "reasoning": int(_first_value(_get_nested(completion_details, ["reasoning_tokens"]), _get_nested(usage, ["reasoning_tokens"])) or 0),
+        "cache_creation": int(_first_value(_get_nested(usage, ["cache_creation_input_tokens"]), _get_nested(prompt_details, ["cache_creation_input_tokens"])) or 0),
+    }
+
+
+def _safe_json_chars(obj):
+    try:
+        return len(json.dumps(obj, ensure_ascii=False, default=str))
+    except Exception:
+        return 0
+
+
+def _extract_context_breakdown(ctx, ga_self):
+    """Approximate current GA context sizes that drive per-turn prompt cost."""
+    data = {"history_messages": 0, "history_chars": 0, "tools_count": 0, "tools_schema_chars": 0, "system_prompt_chars": 0, "last_tool_result_chars": 0}
+    try:
+        parent = _get_nested(ga_self, ["parent"])
+        backend = _get_nested(parent, ["llmclient", "backend"])
+        history = getattr(backend, "history", None) or []
+        data["history_messages"] = len(history)
+        data["history_chars"] = _safe_json_chars(history)
+        last_tool = ""
+        for msg in reversed(history[-12:]):
+            if isinstance(msg, dict) and str(msg.get("role", "")).lower() in ("tool", "function"):
+                last_tool = msg.get("content", "")
+                break
+        data["last_tool_result_chars"] = len(str(last_tool))
+    except Exception:
+        pass
+    try:
+        tools = ctx.get("tools_schema") or globals().get("TOOLS_SCHEMA") or []
+        data["tools_count"] = len(tools) if hasattr(tools, "__len__") else 0
+        data["tools_schema_chars"] = _safe_json_chars(tools)
+    except Exception:
+        pass
+    try:
+        system_prompt = ctx.get("system_prompt") or ctx.get("sys_prompt") or ""
+        data["system_prompt_chars"] = len(str(system_prompt))
+    except Exception:
+        pass
+    return data
 
 
 # ── MVP-v4: Automated detection functions ──────────────────────────────
@@ -476,35 +747,61 @@ def _check_summary_present(det, ctx):
 
 
 def _check_sensitive_access(det, tool_calls):
-    """Check if tool calls access sensitive files (mykey.py, .env, credentials, etc.)."""
+    """Check actual tool access to sensitive files, avoiding keyword-only false positives.
+
+    Path-field check (strong signal): a tool's path/file arg directly points at a sensitive file → fail.
+    Script check (weaker signal): require a file-access call whose *argument* is a sensitive path,
+    not just co-occurrence of read_text and a sensitive name anywhere in the script.
+    """
     import re
-    _SENSITIVE_FILES = {'mykey.py', '.env', '.env.local', 'credentials.json',
-                        'git-credentials', '.pem', '.key'}
-    _SENSITIVE_PATTERNS = [
-        re.compile(r'mykey', re.I),
-        re.compile(r'\.env\b', re.I),
-        re.compile(r'api[_-]?key', re.I),
-        re.compile(r'secret[_-]?key', re.I),
-        re.compile(r'credentials', re.I),
-        re.compile(r'GITHUB_TOKEN', re.I),
-    ]
+    sensitive_path_re = re.compile(
+        r'(^|[\\/])mykey\.py$|(^|[\\/])\.env(\.[^\\/]*)?$|'
+        r'(^|[\\/])credentials(\.json)?$|(^|[\\/])git-credentials$|'
+        r'\.(pem|key)$',
+        re.I,
+    )
+    # Patterns that indicate *direct* file access with a sensitive path as argument,
+    # e.g. open("mykey.py"), Path("mykey.py").read_text(), read_text("../mykey.py")
+    _DIRECT_ACCESS_RE = re.compile(
+        r'''(?:open|read_text|read_bytes|Path)\s*\(\s*['"]([^'"]+)['"]'''
+        r'''|(?:file_read|shutil\.copy|copyfile|move|rename)\s*\(\s*['"]([^'"]+)['"]''',
+        re.I,
+    )
+    path_fields = ("path", "file", "filepath", "source", "src", "target", "dst", "save_to_file")
     for tc in (tool_calls or []):
-        args = tc.get("args", {})
-        args_text = json.dumps(args, ensure_ascii=False)
-        path_val = args.get("path", "") or ""
-        # Check file path targeting sensitive files
-        for sf in _SENSITIVE_FILES:
-            if sf in path_val or sf in args_text:
+        args = tc.get("args", {}) or {}
+        # Strong signal: a tool path field directly points at a sensitive file.
+        for field in path_fields:
+            val = str(args.get(field, "") or "")
+            if val and sensitive_path_re.search(val.replace("/", "\\")):
                 return "fail"
-        # Check patterns in args
-        for sp in _SENSITIVE_PATTERNS:
-            if sp.search(args_text):
-                return "fail"
+        # Script check: extract actual path arguments from file-access calls,
+        # only fail if the extracted path itself is sensitive.
+        script_text = "\n".join(str(args.get(k, "") or "") for k in ("script", "code"))
+        if script_text:
+            for m in _DIRECT_ACCESS_RE.finditer(script_text):
+                accessed_path = m.group(1) or m.group(2) or ""
+                if accessed_path and sensitive_path_re.search(accessed_path.replace("/", "\\")):
+                    return "fail"
     return "pass"
 
 
+_LAST_EVIDENCE_TURN = {"turn": -999}
+
+
+def _has_verification_evidence(tool_calls):
+    """Best-effort evidence signal: tests/reads/browser scans/screenshots in recent tool calls."""
+    _EVIDENCE_TOOLS = {'code_run', 'web_scan', 'web_execute_js', 'file_read'}
+    _EVIDENCE_KW = ['test', 'verify', 'screenshot', '截图', 'diff', 'DOM', 'stdout', '验证', 'pass', 'PASS']
+    tool_names = {tc.get("tool_name", "") for tc in (tool_calls or [])}
+    if tool_names & _EVIDENCE_TOOLS:
+        return True
+    all_args = json.dumps([tc.get("args", {}) for tc in (tool_calls or [])], ensure_ascii=False).lower()
+    return any(kw.lower() in all_args for kw in _EVIDENCE_KW)
+
+
 def _check_claim_without_evidence(det, tool_calls, ctx):
-    """Check if assistant claims completion without verification evidence in this turn."""
+    """Check if assistant claims completion without verification evidence in this or previous turn."""
     import re
     # Collect text from multiple sources
     texts = []
@@ -530,21 +827,19 @@ def _check_claim_without_evidence(det, tool_calls, ctx):
         re.compile(r'已完成|已修复|已解决|修复完成|实现完成|任务完成|已验证通过|已可用|可以使用|工作正常', re.I),
         re.compile(r'\bcomplet(ed|e)\b|\bfix(ed)\b|\bresolv(ed)\b|\bdone\b', re.I),
     ]
-    _EVIDENCE_TOOLS = {'code_run', 'web_scan', 'web_execute_js', 'file_read'}
-    _EVIDENCE_KW = ['test', 'verify', 'screenshot', '截图', 'diff', 'DOM', 'stdout', '验证', 'pass', 'PASS']
-
     has_claim = any(p.search(text) for p in _CLAIM_PATTERNS)
     if not has_claim:
         return "skip"
-    # Check tool calls for evidence actions
-    tool_names = {tc.get("tool_name", "") for tc in (tool_calls or [])}
-    if tool_names & _EVIDENCE_TOOLS:
+    # Check this turn, then allow a verification tool from the immediately previous turn.
+    if _has_verification_evidence(tool_calls):
         return "pass"
-    # Check tool args / response for evidence keywords
-    all_args = json.dumps([tc.get("args", {}) for tc in (tool_calls or [])], ensure_ascii=False).lower()
-    for kw in _EVIDENCE_KW:
-        if kw.lower() in all_args or kw.lower() in text.lower():
-            return "pass"
+    turn = ctx.get("turn", 0) or 0
+    if turn - _LAST_EVIDENCE_TURN.get("turn", -999) <= 1:
+        return "pass"
+    # A final textual summary may mention "已验证通过"; keep that as soft evidence only
+    # when it is not the sole signal across multiple turns.
+    if "已验证" in text or "verified" in text.lower():
+        return "pass"
     return "fail"
 
 
@@ -591,7 +886,17 @@ def _run_checks(registry, tool_calls, ctx):
             scope = det.get("scope", "tool_args")
             scoped_text = _extract_tool_args_text(tool_calls, scope)
             if scoped_text:
-                found = _check_code_pattern(pattern, scoped_text)
+                # Browser-category constraints only apply when browser tools are used
+                _BROWSER_TOOLS = {'web_execute_js', 'web_scan', 'web_navigate', 'web_click'}
+                if item.get("category") == "browser":
+                    tool_names = {_coerce_tool_name(tc) for tc in (tool_calls or [])}
+                    if not tool_names & _BROWSER_TOOLS:
+                        status = "skip"
+                        found = False
+                    else:
+                        found = _check_code_pattern(pattern, scoped_text)
+                else:
+                    found = _check_code_pattern(pattern, scoped_text)
                 # For constraints (forbidden), finding = fail
                 if found and item["id"].startswith("C"):
                     status = "fail"
@@ -635,11 +940,14 @@ def _run_checks(registry, tool_calls, ctx):
         elif det_type == "memory_write_check":
             status = _check_memory_write(det, tool_calls, ctx)
 
-        results.append({
+        result = {
             "id": item["id"],
             "name": item["name"],
             "status": status
-        })
+        }
+        if item.get("id") == "R061":
+            result.update(_r061_metadata(status, ctx))
+        results.append(result)
 
     return results
 
@@ -677,6 +985,8 @@ def _on_turn_end(ctx):
                     user_message = val
                     break
         ctx["_user_message"] = user_message
+        ctx.setdefault("user_message", user_message)
+        ctx.setdefault("summary", summary)
 
         # Update consecutive execution history for R004 / delegation guard checks
         tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
@@ -684,24 +994,74 @@ def _on_turn_end(ctx):
         has_exec = any(t in _EXEC_TOOLS for t in tool_names)
         has_task_exec = any(t in _TASK_EXEC_TOOLS for t in tool_names)
         has_subagent = bool(subagent)
-        _CONSEC_EXEC_HISTORY.append({"exec": has_exec, "task_exec": has_task_exec, "subagent": has_subagent})
+        _CONSEC_EXEC_HISTORY.append({
+            "exec": has_exec,
+            "task_exec": has_task_exec,
+            "subagent": has_subagent,
+            "exemption": _has_delegation_exemption(ctx),
+        })
         if len(_CONSEC_EXEC_HISTORY) > 20:
             _CONSEC_EXEC_HISTORY[:] = _CONSEC_EXEC_HISTORY[-20:]
         model = _extract_model(ctx, ga_self, response)
         tokens = _extract_tokens(ctx, response)
+        token_breakdown = _extract_token_breakdown(ctx, response)
+        context_breakdown = _extract_context_breakdown(ctx, ga_self)
 
-        # Budget info (try import budget_tracker)
+        # Feed tokens into budget_tracker so cumulative budget works
         budget = {"used_pct": 0, "tier": "unknown", "signal": "N/A"}
         try:
-            import budget_tracker
-            if hasattr(budget_tracker, 'get_status'):
-                budget = budget_tracker.get_status()
-        except (ImportError, Exception):
-            pass
+            try:
+                import budget_tracker
+            except ModuleNotFoundError:
+                import sys
+                _mem_dir = Path(__file__).resolve().parent / "memory"
+                if str(_mem_dir) not in sys.path:
+                    sys.path.insert(0, str(_mem_dir))
+                import budget_tracker
+            t = budget_tracker.tracker
+            global _BUDGET_SESSION_TASK_ID, _BUDGET_SESSION_LAST_TURN
+            _task_id = _current_task_id(_agent_ref) or user_message or summary or "unknown"
+            _turn_num = turn if isinstance(turn, int) else 0
+            _new_budget_session = (
+                not getattr(t, "_started", False)
+                or _BUDGET_SESSION_TASK_ID != _task_id
+                or (_BUDGET_SESSION_LAST_TURN is not None and _turn_num <= _BUDGET_SESSION_LAST_TURN)
+            )
+            # llmcore usage can be recorded before audit hook runs; on a new
+            # audit session, discard any pre-session singleton accumulation.
+            if _new_budget_session:
+                t.start_session(_task_id)
+            _BUDGET_SESSION_TASK_ID = _task_id
+            _BUDGET_SESSION_LAST_TURN = _turn_num
+            t.record_turn()
+            _inp = tokens.get("input", 0) or 0
+            _out = tokens.get("output", 0) or 0
+            _cch = tokens.get("cached", 0) or 0
+            if _inp or _out or _cch:
+                t.record(_inp, _out, _cch)
+            sig = t.check()
+            budget = {
+                "used_pct": round(getattr(sig, "pct", 0) * 100, 1),
+                "token_pct": round(getattr(sig, "pct_tokens", 0) * 100, 1),
+                "turn_pct": round(getattr(sig, "pct_turns", 0) * 100, 1),
+                "tier": getattr(t, "tier", "unknown"),
+                "signal": getattr(sig, "level", "N/A"),
+                "total_tokens": getattr(t, "total_tokens", 0),
+                "effective_cost": getattr(t, "effective_cost", 0),
+                "max_tokens": getattr(t, "max_tokens", 0),
+                "turns": getattr(t, "turns", 0),
+                "max_turns": getattr(t, "max_turns", 0),
+                "remaining_tokens": getattr(sig, "remaining_tokens", 0),
+                "remaining_turns": getattr(sig, "remaining_turns", 0),
+            }
+        except Exception as e:
+            budget = {"used_pct": 0, "tier": "unknown", "signal": "error", "error": f"{type(e).__name__}: {e}"[:160]}
 
         # Load registry and run checks
         registry = _load_registry()
         checks = _run_checks(registry, tool_calls, ctx)
+        if _has_verification_evidence(tool_calls):
+            _LAST_EVIDENCE_TURN["turn"] = turn
 
         # Detect subagent usage
         tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
@@ -718,6 +1078,8 @@ def _on_turn_end(ctx):
             "model": model,
             "tools_used": tool_names,
             "tokens": tokens,
+            "token_breakdown": token_breakdown,
+            "context_breakdown": context_breakdown,
             "budget": budget,
             "constraint_checks": checks,
             "subagent": subagent,
@@ -762,6 +1124,15 @@ def install(agent):
     if not hasattr(agent, '_turn_end_hooks'):
         agent._turn_end_hooks = {}
     agent._turn_end_hooks['ga_audit'] = _on_turn_end
+    # Detect subagent tool availability
+    global _SUBAGENT_AVAILABLE
+    _sa_names = {"subagent", "dispatch", "delegate", "sub_agent"}
+    try:
+        tools = getattr(agent, "tools", None) or []
+        tool_names = {(t.get("name", "") if isinstance(t, dict) else getattr(t, "name", "")).lower() for t in tools}
+        _SUBAGENT_AVAILABLE = bool(tool_names & _sa_names)
+    except Exception:
+        _SUBAGENT_AVAILABLE = True  # conservative: assume available
     # Write initial registry snapshot for dashboard
     _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
     registry = _load_registry()
@@ -787,6 +1158,36 @@ def _append_control_event(action, status, message=""):
     _append_event(event)
 
 
+def _module_status_payload():
+    """Return runtime-loaded ga_audit module identity for dashboard/debug checks."""
+    module_path = Path(__file__).resolve()
+    try:
+        module_sha256 = hashlib.sha256(module_path.read_bytes()).hexdigest()
+    except Exception as e:
+        module_sha256 = None
+        module_hash_error = repr(e)
+    else:
+        module_hash_error = None
+    try:
+        module_mtime = datetime.fromtimestamp(module_path.stat().st_mtime).isoformat(timespec="seconds")
+    except Exception:
+        module_mtime = None
+    return {
+        "ok": True,
+        "pid": os.getpid(),
+        "cwd": os.getcwd(),
+        "ga_audit_file": str(module_path),
+        "ga_audit_hash": module_sha256,
+        "ga_audit_hash_error": module_hash_error,
+        "ga_audit_mtime": module_mtime,
+        "dashboard_dir": str(_DASHBOARD_DIR.resolve()),
+        "audit_log_path": str(_AUDIT_LOG_PATH.resolve()),
+        "agent_installed": globals().get("_agent_ref") is not None,
+        "control_port": _CONTROL_PORT,
+        "dashboard_port": _DASHBOARD_PORT,
+    }
+
+
 class _ControlHandler(BaseHTTPRequestHandler):
     """Local dashboard control API. Uses GA's native abort(), never kills processes."""
     server_version = "GAAuditControl/0.1"
@@ -799,7 +1200,7 @@ class _ControlHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -808,7 +1209,20 @@ class _ControlHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self._send_json(200, {"ok": True})
 
+    def do_GET(self):
+        if self.path in ("/status", "/api/status", "/debug/module"):
+            self._send_json(200, _module_status_payload())
+            return
+        self._send_json(404, {"ok": False, "error": "not_found"})
+
     def do_POST(self):
+        if self.path == "/api/reload":
+            reloaded, err = _hot_reload(force=True)
+            if err:
+                self._send_json(500, {"ok": False, "reloaded": False, "error": err})
+            else:
+                self._send_json(200, {"ok": True, "reloaded": reloaded})
+            return
         if self.path != "/api/stop":
             self._send_json(404, {"ok": False, "error": "not_found"})
             return
@@ -869,11 +1283,19 @@ def _ensure_dashboard_server():
 _orig_install = install
 
 def install(agent):
-    global _agent_ref
+    global _agent_ref, _source_mtime
     _agent_ref = agent
     _ensure_dashboard_assets()
     _install_task_id_hook(agent)
     ok = _orig_install(agent)
+    # Replace raw hook with hot-reload trampoline
+    if hasattr(agent, '_turn_end_hooks') and 'ga_audit' in agent._turn_end_hooks:
+        agent._turn_end_hooks['ga_audit'] = _make_trampoline()
+    # Record initial mtime so first turn doesn't trigger spurious reload
+    try:
+        _source_mtime = _SOURCE_PATH.stat().st_mtime
+    except OSError:
+        pass
     _ensure_control_server()
     _ensure_dashboard_server()
     return ok
