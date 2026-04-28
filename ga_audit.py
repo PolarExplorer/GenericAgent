@@ -225,12 +225,32 @@ def _extract_tool_args_text(tool_calls, scope="tool_args"):
     return "\n".join(parts)
 
 
-def _check_code_pattern(pattern, text):
-    """Check if pattern exists in text (regex or plain)."""
+def _check_code_pattern(pattern, text, negative_context=None):
+    """Check if pattern exists in text (regex or plain).
+
+    If *negative_context* regex is given, matches that are immediately preceded
+    (within 20 chars) by a negative-context phrase are excluded (= not a real hit).
+    This prevents false positives when a rule merely *mentions* the forbidden term
+    (e.g. "禁用 mimo-v2.5-pro" in working-memory text).
+    """
     try:
-        return bool(re.search(pattern, text, re.IGNORECASE))
+        matches = list(re.finditer(pattern, text, re.IGNORECASE))
     except re.error:
-        return pattern.lower() in text.lower()
+        if pattern.lower() in text.lower():
+            matches = [type('M', (), {'start': lambda s: text.lower().find(pattern.lower())})()]
+        else:
+            return False
+    if not matches:
+        return False
+    if not negative_context:
+        return True
+    # Filter out matches preceded by negative context
+    for m in matches:
+        start = max(0, m.start() - 20)
+        preceding = text[start:m.start()]
+        if not re.search(negative_context, preceding, re.IGNORECASE):
+            return True  # genuine hit without negation prefix
+    return False  # all matches were negated
 
 
 def _coerce_tool_name(tool_call):
@@ -888,15 +908,16 @@ def _run_checks(registry, tool_calls, ctx):
             if scoped_text:
                 # Browser-category constraints only apply when browser tools are used
                 _BROWSER_TOOLS = {'web_execute_js', 'web_scan', 'web_navigate', 'web_click'}
+                neg_ctx = det.get("negative_context")
                 if item.get("category") == "browser":
                     tool_names = {_coerce_tool_name(tc) for tc in (tool_calls or [])}
                     if not tool_names & _BROWSER_TOOLS:
                         status = "skip"
                         found = False
                     else:
-                        found = _check_code_pattern(pattern, scoped_text)
+                        found = _check_code_pattern(pattern, scoped_text, neg_ctx)
                 else:
-                    found = _check_code_pattern(pattern, scoped_text)
+                    found = _check_code_pattern(pattern, scoped_text, neg_ctx)
                 # For constraints (forbidden), finding = fail
                 if found and item["id"].startswith("C"):
                     status = "fail"

@@ -722,7 +722,8 @@
       "detection": {
         "type": "code_pattern",
         "pattern": "mimo-v2.5-pro",
-        "scope": "tool_args"
+        "scope": "tool_args",
+        "negative_context": "禁[用止]|不[要得]用|ban|forbid|禁用"
       },
       "active": true
     },
