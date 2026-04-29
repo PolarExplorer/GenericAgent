@@ -34,6 +34,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .constraint { background: var(--bg); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; border-left: 3px solid var(--green); font-size: 13px; }
 .constraint.fail { border-left-color: var(--red); }
 .constraint.skip { border-left-color: var(--border); }
+.constraint.manual { border-left-color: var(--yellow); opacity: 0.7; }
 .constraint .cid { color: var(--text-dim); font-size: 11px; }
 .constraint .cname { color: var(--text); }
 .constraint .cstatus { float: right; font-size: 11px; font-weight: 600; }
@@ -44,6 +45,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .cstatus.pass { color: var(--green); }
 .cstatus.fail { color: var(--red); }
 .cstatus.skip { color: var(--text-dim); }
+.cstatus.manual { color: var(--yellow); }
+.constraint .csrc { font-size: 10px; color: var(--text-dim); margin: 0 4px; opacity: 0.6; }
 .event { background: var(--bg); border-radius: 6px; padding: 10px 14px; margin-bottom: 6px; font-size: 13px; border-left: 3px solid var(--accent); }
 .event .meta { color: var(--text-dim); font-size: 11px; margin-bottom: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
 .event .summary { color: var(--text); }
@@ -63,6 +66,15 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .violation .vid { color: var(--red); font-weight: 600; }
 .violation .vdetail { color: var(--text-dim); font-size: 12px; }
 .subagent-entry { background: var(--bg); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; border-left: 3px solid var(--purple); }
+.sa-header { font-weight: 600; }
+.sa-turn { display: inline-block; background: var(--purple); color: #fff; border-radius: 3px; padding: 0 5px; font-size: 11px; margin-right: 6px; }
+.sa-tags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+.sa-tag { background: #2a2a3a; border: 1px solid var(--purple); color: #c4b5fd; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+.sa-input { margin-top: 4px; color: var(--text-dim); font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.sa-cmd-toggle { margin-top: 4px; color: var(--purple); font-size: 11px; cursor: pointer; user-select: none; }
+.sa-cmd-toggle:hover { text-decoration: underline; }
+.sa-cmd-body { display: none; margin-top: 4px; padding: 6px 8px; background: #1a1a2a; border-radius: 4px; font-size: 11px; color: var(--text-dim); white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+.sa-cmd-body.sa-cmd-show { display: block; }
 .budget-bar { width: 120px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
 .budget-bar .fill { height: 100%; background: var(--green); transition: width 0.3s; }
 .budget-bar .fill.warn { background: var(--yellow); }
@@ -100,6 +112,21 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .event .task-id-mini { color:var(--text-dim); }
 .stop-modal-overlay { position:fixed; inset:0; background:rgba(0, 0, 0, 0.68); z-index:9999; display:none; align-items:center; justify-content:center; padding:20px; }
 .stop-modal-card { width:min(100%, 420px); background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:0 16px 40px rgba(0, 0, 0, 0.45); }
+/* constraint section split */
+.constraint-section { margin-bottom: 12px; }
+.constraint-section-header { font-size: 13px; font-weight: 600; color: var(--text); padding: 6px 8px; background: var(--bg); border-radius: 6px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; user-select: none; }
+.constraint-section-header[onclick] { cursor: pointer; }
+.constraint-section-header[onclick]:hover { background: #1c2129; }
+.constraint-count { font-size: 11px; color: var(--text-dim); font-weight: 400; }
+.copy-violations-btn { background: transparent; border: 1px solid var(--red); color: var(--red); padding: 1px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; margin-left: auto; transition: all .2s; }
+.copy-violations-btn:hover { background: var(--red); color: #fff; }
+.copy-violations-btn.copied { border-color: var(--green); color: var(--green); }
+.copy-violations-btn.copied:hover { background: var(--green); color: #fff; }
+.toggle-arrow { font-size: 10px; color: var(--text-dim); transition: transform 0.2s; }
+.constraint-section-header.collapsed .toggle-arrow { transform: rotate(0deg); }
+.constraint-section-header:not(.collapsed) .toggle-arrow { transform: rotate(90deg); }
+.hidden { display: none; }
+.uncovered-section .constraint { opacity: 0.6; }
 .stop-modal-warn { color:var(--red); }
 .stop-modal-input { width:100%; margin-top:14px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-size:14px; }
 .stop-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
@@ -131,12 +158,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
     <div class="view-controls">
       <label class="view-hint">视图</label>
       <select id="view-mode">
-        <option value="recent">最近80条</option>
         <option value="current">当前任务</option>
         <option value="selected">指定任务</option>
       </select>
       <select id="task-select" title="选择 task_id"></select>
-      <span class="view-hint" id="view-hint">默认显示最近80条</span>
+      <span class="view-hint" id="view-hint">默认显示当前任务</span>
     </div>
     <div id="task-summary" class="task-summary"></div>
     <div id="events-list"></div>
@@ -164,7 +190,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 const POLL_MS = 2000;
 let lastLen = 0;
 let lastSignature = '';
-let viewMode = 'recent';
+let viewMode = 'current';
 let selectedTaskId = '';
 let cachedEvents = [];
 let cachedRegistry = {constraints:[], rules:[]};
@@ -174,26 +200,121 @@ async function fetchJSON(url) {
   catch { return null; }
 }
 
+// Aggregate constraint_checks across all task events: worst-case per id (any fail → fail)
+function worstCaseChecks(taskEvents) {
+  const map = {};  // id → {best status, latest check obj}
+  const priority = {fail: 3, pass: 2, skip: 1};
+  for (const ev of taskEvents) {
+    for (const c of (ev.constraint_checks || [])) {
+      const prev = map[c.id];
+      const prio = priority[c.status] || 0;
+      if (!prev || prio > (priority[prev.status] || 0)) {
+        map[c.id] = {...c};
+      }
+    }
+  }
+  return Object.values(map);
+}
+
 function renderConstraints(registry, latestChecks) {
   const el = document.getElementById('constraints-list');
-  const all = [...(registry.constraints||[]), ...(registry.rules||[])];
+  const allReg = [...(registry.constraints||[]), ...(registry.rules||[])];
+  const dslAll = (registry.dsl_constraints||[]);
   const checkMap = {};
   (latestChecks||[]).forEach(c => checkMap[c.id] = c);
-  el.innerHTML = all.map(item => {
+
+  // Build DSL id set for dedup
+  const dslIdSet = new Set(dslAll.map(d => d.id));
+
+  // Dedup: registry items covered by DSL (REG-{id} exists in DSL) are excluded
+  const autoPool = [];  // merged auto-detectable items
+  const manualPool = []; // items that need human review
+
+  // 1) All DSL items → auto
+  for (const item of dslAll) autoPool.push({...item, _source: 'DSL'});
+
+  // 2) Registry items: check if covered by DSL
+  for (const item of allReg) {
+    const coveredByDsl = dslIdSet.has('REG-' + item.id);
+    const detType = (item.detection && item.detection.type) || 'none';
+    if (coveredByDsl) continue; // skip, DSL version takes priority
+    if (detType === 'manual') manualPool.push({...item, _source: 'Registry'});
+    else autoPool.push({...item, _source: 'Registry'});
+  }
+
+  // Determine status for each auto item
+  const autoFail = [], autoPass = [], autoSkip = [];
+  for (const item of autoPool) {
     const check = checkMap[item.id] || {};
     const st = check.status || 'skip';
-    const label = {pass:'✓ PASS', fail:'✗ FAIL', skip:'— SKIP'}[st] || st;
+    item._status = st; item._check = check;
+    if (st === 'fail') autoFail.push(item);
+    else if (st === 'pass') autoPass.push(item);
+    else autoSkip.push(item);
+  }
+
+  function renderItem(item, statusOverride) {
+    const check = item._check || checkMap[item.id] || {};
+    const st = statusOverride || item._status || (check.status) || 'skip';
+    const labels = {pass:'✅ 通过', fail:'🚨 违规', skip:'⏭ 未触发', manual:'📋 人工审查'};
+    const label = labels[st] || st;
+    const cssClass = st === 'manual' ? 'manual' : st;
+    const srcTag = item._source ? `<span class="csrc">[${item._source}]</span>` : '';
     const detail = constraintDetailHtml(item, check);
-    return `<div class="constraint ${st}"><span class="cstatus ${st}">${label}</span><span class="cid">${escapeHtml(item.id)}</span> <span class="cname">${escapeHtml(item.name)}</span>${detail}</div>`;
-  }).join('');
+    return `<div class="constraint ${cssClass}"><span class="cstatus ${cssClass}">${label}</span>${srcTag}<span class="cid">${escapeHtml(item.id)}</span> <span class="cname">${escapeHtml(item.name || item.title || '')}</span>${detail}</div>`;
+  }
+
+  const failHtml = autoFail.map(item => renderItem(item)).join('');
+  const passHtml = autoPass.map(item => renderItem(item)).join('');
+  const skipHtml = autoSkip.map(item => renderItem(item)).join('');
+  const manualHtml = manualPool.map(item => renderItem(item, 'manual')).join('');
+
+  // Build violation text for copy button
+  const _failItems = autoFail.map(item => {
+    const c = item._check || {};
+    const detail = (c.details || []).map(d => d.msg || d.message || '').filter(Boolean).join(', ');
+    return `[${item.id}] ${item.name || item.title || ''}${detail ? ': ' + detail : ''}`;
+  }).join('; ');
+  window.__violationText = `task_id：${selectedTaskId || '未知'}；违规记录：${_failItems}`;
+
+  const dslErrHtml = registry.dsl_load_error ? `<div class="constraint-section-header" style="color:var(--red)">⚠ DSL加载错误: ${escapeHtml(registry.dsl_load_error)}</div>` : '';
+
+  el.innerHTML = `
+    <div class="constraint-section">
+      <div class="constraint-section-header">🔧 自动检测 <span class="constraint-count">${autoPool.length} 条 · ${autoFail.length} 违规 · ${autoPass.length} 通过 · ${autoSkip.length} 未触发</span>${autoFail.length > 0 ? `<button class="copy-violations-btn" onclick="navigator.clipboard.writeText(window.__violationText||'').then(()=>{this.textContent='✅ 已复制';this.classList.add('copied');setTimeout(()=>{this.textContent='📋 复制违规';this.classList.remove('copied')},1500)})">📋 复制违规</button>` : ''}</div>
+      ${dslErrHtml}
+      ${failHtml}
+      ${passHtml}
+      ${autoSkip.length > 0 ? `
+      <div class="constraint-section-header collapsed" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('hidden')" style="font-size:0.85em;padding:4px 12px;cursor:pointer">
+        ⏭ 未触发 <span class="constraint-count">${autoSkip.length} 条</span> <span class="toggle-arrow">▶</span>
+      </div>
+      <div class="hidden">${skipHtml}</div>` : ''}
+    </div>
+    <div class="constraint-section uncovered-section">
+      <div class="constraint-section-header collapsed" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('hidden')" style="cursor:pointer">
+        📋 人工审查 <span class="constraint-count">${manualPool.length} 条</span> <span class="toggle-arrow">▶</span>
+      </div>
+      <div class="hidden">${manualHtml}</div>
+    </div>`;
 }
 
 function constraintDetailHtml(item, check) {
-  if (!check || item.id !== 'R061') return '';
+  if (!check) return '';
   const parts = [];
+  // Severity badge (for any constraint that reports it)
   if (check.severity) parts.push(`<span class="cbadge ${escapeHtml(check.severity)}">${escapeHtml(check.severity)}</span>`);
+  // DSL engine: category and mode
+  if (check.category) parts.push(`<span class="cbadge">${escapeHtml(check.category)}</span>`);
+  if (check.mode) parts.push(`<span style="color:var(--gray)">[${escapeHtml(check.mode)}]</span>`);
+  // R061 specifics (keep backward compat)
   if (check.consecutive_exec_turns !== undefined) parts.push(`${escapeHtml(check.consecutive_exec_turns)} turns`);
   if (check.recommended_action) parts.push(escapeHtml(check.recommended_action));
+  // Violations from checks
+  if (check.violations && check.violations.length > 0) {
+    const msgs = check.violations.map(v => typeof v === 'string' ? v : (v.message || JSON.stringify(v))).slice(0, 3);
+    parts.push(`<span style="color:var(--red)">${msgs.map(m => escapeHtml(m)).join('; ')}</span>`);
+  }
   return parts.length ? `<div class="cdetail">${parts.join(' · ')}</div>` : '';
 }
 
@@ -286,9 +407,10 @@ function buildTaskSummaries(events) {
 
 function selectedEvents(events) {
   const clean = nonControlEvents(events);
-  if (viewMode === 'current') return currentTaskEvents(events);
-  if (viewMode === 'selected' && selectedTaskId) return clean.filter(ev => (ev.task_id || '__no_task__') === selectedTaskId);
-  return clean.slice(-80);
+  if (viewMode === 'selected' && selectedTaskId) {
+    return clean.filter(ev => (ev.task_id || '__no_task__') === selectedTaskId);
+  }
+  return currentTaskEvents(events);
 }
 
 function renderTaskControls(events, shownEvents) {
@@ -332,7 +454,7 @@ function renderSemanticFindings(findings) {
 
 function renderEvents(events, allEvents) {
   const el = document.getElementById('events-list');
-  const recent = events.slice(-80).reverse();
+  const recent = events.slice().reverse();
   el.innerHTML = recent.map(ev => {
     const hasV = ev.violations && ev.violations.length > 0;
     const semanticHtml = renderSemanticFindings(ev.semantic_findings);
@@ -398,12 +520,27 @@ function renderSubagents(subagents) {
   const el = document.getElementById('subagents-list');
   if (!subagents.length) { el.innerHTML = '<span style="color:var(--text-dim);font-size:13px">暂无记录</span>'; return; }
   el.innerHTML = subagents.slice(-30).reverse().map(s => {
-    const name = s.task_name || s.name || '—';
-    const pid = s.pid ? `PID ${s.pid}` : '';
-    const status = s.status || '';
-    const dur = s.duration ? `${s.duration}s` : '';
-    const meta = [pid, status, dur].filter(Boolean).join(' · ');
-    return `<div class="subagent-entry">Turn ${s.turn} — <b>${name}</b>${meta ? '<div class="sa-meta">'+meta+'</div>' : ''}</div>`;
+    const task = s.task || s.task_name || s.name || '';
+    const src = s.source_tool || '';
+    const llm = s.llm_no ? `模型 #${s.llm_no}` : '';
+    const bg = s.bg ? '后台' : '';
+    const input = s.input || '';
+    const cmd = s.command || '';
+    // Tags row
+    const tags = [src, llm, bg].filter(Boolean).map(t =>
+      `<span class="sa-tag">${escapeHtml(t)}</span>`).join('');
+    // Input summary
+    const inputHtml = input
+      ? `<div class="sa-input">${escapeHtml(input)}</div>` : '';
+    // Collapsible command
+    const cmdHtml = cmd
+      ? `<div class="sa-cmd-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('sa-cmd-show')">▶ 原始命令</div><div class="sa-cmd-body">${escapeHtml(cmd)}</div>` : '';
+    const title = task ? escapeHtml(task) : '<span style="color:var(--text-dim)">未命名任务</span>';
+    return `<div class="subagent-entry">
+      <div class="sa-header"><span class="sa-turn">T${s.turn}</span> ${title}</div>
+      ${tags ? '<div class="sa-tags">'+tags+'</div>' : ''}
+      ${inputHtml}${cmdHtml}
+    </div>`;
   }).join('');
 }
 
@@ -429,10 +566,17 @@ function updateTopbar(ev, taskEvents, violations) {
   document.getElementById('lbl-updated').textContent = '更新: ' + new Date().toLocaleTimeString();
 }
 
-function updateGovernanceBar(taskEvents, violations, latestChecks) {
-  // 通过率
-  const checks = latestChecks || [];
-  const evaluated = checks.filter(c => c.status === 'pass' || c.status === 'fail');
+function updateGovernanceBar(taskEvents, violations, latestChecks, registry) {
+  // 通过率：只基于 automated 约束（排除 manual 类型）
+  const manualIds = new Set();
+  if (registry) {
+    for (const item of [...(registry.constraints||[]), ...(registry.rules||[])]) {
+      if ((item.detection && item.detection.type) === 'manual') manualIds.add(item.id);
+    }
+  }
+  const allChecks = taskEvents.flatMap(ev => (ev.constraint_checks || []));
+  const autoChecks = allChecks.filter(c => !manualIds.has(c.id));
+  const evaluated = autoChecks.filter(c => c.status === 'pass' || c.status === 'fail');
   const passed = evaluated.filter(c => c.status === 'pass').length;
   const rate = evaluated.length ? Math.round(passed / evaluated.length * 100) : 100;
   const rateEl = document.getElementById('gov-pass-rate');
@@ -477,12 +621,13 @@ function renderDashboard(events, registry, force=false) {
   const subagents = taskSubagents(taskEvents);
   const latestTaskEvent = taskEvents[taskEvents.length - 1] || latest;
   renderTaskControls(events, taskEvents);
-  renderConstraints(registry, latestTaskEvent.constraint_checks);
+  const aggregatedChecks = worstCaseChecks(taskEvents);
+  renderConstraints(registry, aggregatedChecks);
   renderEvents(taskEvents, events);
   renderViolations(violations);
   renderSubagents(subagents);
   updateTopbar(latestTaskEvent, taskEvents, violations);
-  updateGovernanceBar(taskEvents, violations, latestTaskEvent.constraint_checks);
+  updateGovernanceBar(taskEvents, violations, aggregatedChecks, registry);
 }
 
 async function poll() {

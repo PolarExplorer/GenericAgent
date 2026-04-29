@@ -529,6 +529,9 @@ def _make_task_hook(card, done_event, on_final):
     """飞书任务 hook：每轮 patch 卡片状态；结束触发 on_final(raw) 处理附件。"""
     def hook(ctx):
         try:
+            # DEBUG: 临时打印回调字段，排查模型显示问题
+            _dbg_keys = ['summary', 'model_trace', 'exit_reason']
+            _dbg = {k: ctx.get(k) for k in _dbg_keys}
             if ctx.get('exit_reason'):
                 resp = ctx.get('response')
                 raw = resp.content if hasattr(resp, 'content') else str(resp)
@@ -543,12 +546,26 @@ def _make_task_hook(card, done_event, on_final):
                         card.waiting_reply(question, candidates)
                         done_event.set()
                         return
-                card.done(_display_text(raw))
+                mt = ctx.get('model_trace') or {}
+                actual = mt.get('actual', '')
+                display = _display_text(raw)
+                if actual:
+                    chain = mt.get('chain', [])
+                    fb = f" ⚠️fb{len(chain)-1}" if chain and len(chain) > 1 else ''
+                    display += f"\n\n---\n🤖 {actual}{fb}"
+                card.done(display)
                 on_final(raw)
                 done_event.set()
             elif ctx.get('summary'):
                 detail = _build_step_detail(ctx.get('response'), ctx.get('tool_calls') or [])
-                card.step(ctx['summary'], detail)
+                mt = ctx.get('model_trace') or {}
+                summary_text = ctx['summary']
+                actual = mt.get('actual', '')
+                if actual:
+                    chain = mt.get('chain', [])
+                    fb = f" ⚠️fb{len(chain)-1}" if chain and len(chain) > 1 else ''
+                    summary_text += f" | 🤖{actual}{fb}"
+                card.step(summary_text, detail)
         except Exception as e:
             print(f"[fs hook] error: {e}")
     return hook

@@ -177,13 +177,17 @@ def run():
 
             log.info(f'启动 {APP_NAME}.py (pid will follow)')
             try:
-                with open(STDOUT_LOG, 'a', encoding='utf-8') as out:
+                with open(STDOUT_LOG, 'a', encoding='utf-8', buffering=1) as out:
+                    child_env = os.environ.copy()
+                    child_env['PYTHONUNBUFFERED'] = '1'
+                    child_env['PYTHONDONTWRITEBYTECODE'] = '1'
                     proc = subprocess.Popen(
                         [PYTHON, TARGET],
                         cwd=BASE_DIR,
                         stdout=out,
                         stderr=subprocess.STDOUT,
-                        creationflags=CREATE_NO_WINDOW
+                        creationflags=CREATE_NO_WINDOW,
+                        env=child_env,
                     )
                     log.info(f'{APP_NAME}.py 已启动, PID={proc.pid}')
 

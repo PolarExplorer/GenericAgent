@@ -31,10 +31,7 @@
       "name": "改自身源码前必须请示",
       "category": "源码安全",
       "source": "CONSTITUTION #1",
-      "detection": {
-        "type": "manual",
-        "description": "修改自身/GA源码前必须获得用户明确授权；./temp 内实验除外"
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -123,10 +120,7 @@
       "name": "默认中文，代码/命令/变量名用英文",
       "category": "用户偏好",
       "source": "用户全局CLAUDE.md",
-      "detection": {
-        "type": "manual",
-        "description": "交互输出默认中文；代码、命令、变量名保持英文"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -135,10 +129,7 @@
       "name": "不要谄媚，直接给真实判断",
       "category": "协作原则",
       "source": "用户全局CLAUDE.md",
-      "detection": {
-        "type": "manual",
-        "description": "禁止无意义夸赞；方案有问题直接指出"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -171,10 +162,7 @@
       "name": "新项目/新目录先建立规则与结构约定",
       "category": "项目规范",
       "source": "用户全局CLAUDE.md",
-      "detection": {
-        "type": "manual",
-        "description": "没有规范的工作空间不动手"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -289,10 +277,7 @@
       "name": "UI开发默认走 gpt-image-2 mockup 流程",
       "category": "UI开发",
       "source": "ui_dev_sop",
-      "detection": {
-        "type": "manual",
-        "description": "先生成mockup再编码还原"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -339,9 +324,7 @@
       "priority": "high",
       "source": "memory_management_sop",
       "description": "任何写入 L1/L2/L3 的事实必须源自成功工具调用结果，禁止写入猜测/未验证假设。",
-      "detection": {
-        "type": "manual"
-      },
+      "detection": "engine",
       "enabled": true
     },
     {
@@ -380,9 +363,7 @@
       "priority": "high",
       "source": "memory_management_sop",
       "description": "新增/删除 L2/L3 后应同步 L1 导航行，L1 只保留极简触发词索引。",
-      "detection": {
-        "type": "manual"
-      },
+      "detection": "engine",
       "enabled": true
     },
     {
@@ -404,9 +385,7 @@
       "priority": "high",
       "source": "autonomous_operation_sop",
       "description": "自主运行遇到修改 global_mem/SOP、安装软件、外部 API、删除非临时文件等需写报告待审。",
-      "detection": {
-        "type": "manual"
-      },
+      "detection": "engine",
       "enabled": true
     },
     {
@@ -571,9 +550,7 @@
       "priority": "medium",
       "source": "web_access_sop",
       "description": "网络访问优先 curl/requests，动态交互用 web 工具，必要时再用 CDP Proxy。",
-      "detection": {
-        "type": "manual"
-      },
+      "detection": "engine",
       "enabled": true
     },
     {
@@ -708,10 +685,7 @@
       "name": "执行类子任务必须走 subagent",
       "category": "分发纪律",
       "source": "RULES #14",
-      "detection": {
-        "type": "consecutive_execution_check",
-        "threshold": 3
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -744,10 +718,7 @@
       "name": "No evidence, no claim",
       "category": "验证纪律",
       "source": "RULES #9",
-      "detection": {
-        "type": "manual",
-        "description": "未验证前不得宣称完成/修复/可用"
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -767,10 +738,7 @@
       "name": "决策前查记忆，有 SOP/utils 必用",
       "category": "记忆纪律",
       "source": "CONSTITUTION #2",
-      "detection": {
-        "type": "manual",
-        "description": "决策前查询记忆；涉及 SOP/utils 时必须读取并使用，禁止凭印象"
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -919,10 +887,7 @@
       "name": "scan 空/不全先等待再扫",
       "category": "Web纪律",
       "source": "RULES #7",
-      "detection": {
-        "type": "manual",
-        "description": "web_scan 为空或不完整时先等待/切换后复扫，禁止首扫定论"
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -943,10 +908,7 @@
       "name": "物理模拟后必须确认",
       "category": "验证纪律",
       "source": "RULES #4",
-      "detection": {
-        "type": "manual",
-        "description": "GUI/浏览器/物理模拟操作后必须看状态或日志确认结果"
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -1020,10 +982,7 @@
       "name": "需求未完成必须工具调用",
       "category": "执行纪律",
       "source": "行动规范",
-      "detection": {
-        "type": "manual",
-        "description": "若用户需求未完成，必须继续进行工具调用；不能只口头收尾"
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -1044,10 +1003,7 @@
       "name": "失败后禁止无新信息重复操作",
       "category": "调试纪律",
       "source": "行动原则",
-      "detection": {
-        "type": "manual",
-        "description": "失败后先收集新信息，禁止无新信息的重复尝试"
-      },
+      "detection": "engine",
       "active": true
     },
     {
@@ -1091,10 +1047,7 @@
       "name": "除真实风险外不要问“你确定吗”",
       "category": "交互规则",
       "source": "用户全局CLAUDE.md",
-      "detection": {
-        "type": "manual",
-        "description": "降低无效确认打断"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -1127,10 +1080,7 @@
       "name": "改完主动跑 test/lint/build 验证",
       "category": "验证规则",
       "source": "用户全局CLAUDE.md",
-      "detection": {
-        "type": "manual",
-        "description": "不要只改不验"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -1179,10 +1129,7 @@
       "name": "人物图生成用外貌特征替代名人姓名",
       "category": "图片生成规则",
       "source": "image_gen_sop",
-      "detection": {
-        "type": "manual",
-        "description": "降低名人拒绝风险"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -1239,10 +1186,7 @@
       "name": "每个独立子任务动手前必须标注 llm_no",
       "category": "模型调度",
       "source": "model_dispatch_sop",
-      "detection": {
-        "type": "manual",
-        "description": "分发门硬约束"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -1251,10 +1195,7 @@
       "name": "纯编码修改必须走 llm_no=7 Codex",
       "category": "模型调度",
       "source": "model_dispatch_sop",
-      "detection": {
-        "type": "manual",
-        "description": "写/改/重构代码文件"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -1263,10 +1204,7 @@
       "name": "信息收集/research 必须走 llm_no=6 GPT-5.5",
       "category": "模型调度",
       "source": "model_dispatch_sop",
-      "detection": {
-        "type": "manual",
-        "description": "通用执行优先便宜模型"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -1275,10 +1213,7 @@
       "name": "批量文档处理/翻译/数据提取走 llm_no=6",
       "category": "模型调度",
       "source": "model_dispatch_sop",
-      "detection": {
-        "type": "manual",
-        "description": "结构化执行任务"
-      },
+      "detection": "engine",
       "added": "2026-04-27",
       "active": true
     },
@@ -1390,11 +1325,7 @@
       "priority": "high",
       "source": "RULES #14",
       "description": "连续>=3轮主Agent直接执行编码/信息收集类工具调用而未委托subagent，视为违规。",
-      "detection": {
-        "type": "subagent_delegation_guard",
-        "threshold": 3,
-        "description": "检测连续>=3轮 coding/info-gathering 工具直执且未委托subagent"
-      },
+      "detection": "engine",
       "enabled": true
     },
     {

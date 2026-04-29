@@ -1114,10 +1114,11 @@ class ChatPanel(QWidget):
         ly.addWidget(dot)
 
         # Model name (clickable to show model list)
-        self._model_badge = QLabel(self._model_name())
+        self._model_badge = QLabel(self._actual_model_name())
         self._model_badge.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         self._model_badge.setCursor(QCursor(Qt.PointingHandCursor))
         self._model_badge.mousePressEvent = lambda e: self._show_model_menu(e)
+        self._refresh_model_badge()
         ly.addWidget(self._model_badge)
 
         self._streaming_badge = _StreamingBadge()
@@ -1536,7 +1537,7 @@ class ChatPanel(QWidget):
             return
         self.agent.next_llm(n=idx)
         name = self._model_name()
-        self._model_badge.setText(name)
+        self._refresh_model_badge()
         self._model_info.setText(f"当前模型：{name} (#{self.agent.llm_no})")
         self._add_system_notice(f"已切换至 {name}，对话上下文已保留")
         self._refresh_model_rows_style()
@@ -1730,6 +1731,7 @@ class ChatPanel(QWidget):
                     self._set_send_mode()
                     self._streaming_badge.hide()
                     self.last_reply_time = time.time()
+                    self._refresh_model_badge()
                     self._update_token_usage()
                     self._scroll_bottom()
                     self._auto_save()
@@ -1857,6 +1859,35 @@ class ChatPanel(QWidget):
             return self.agent.get_llm_name()
         except Exception:
             return "未知"
+
+    def _model_trace(self) -> dict:
+        try:
+            llmclient = getattr(self.agent, "llmclient", None)
+            backend = getattr(llmclient, "backend", None) if llmclient else None
+            trace = getattr(backend, "model_trace", None) if backend else None
+            return trace if isinstance(trace, dict) else {}
+        except Exception:
+            return {}
+
+    def _actual_model_name(self) -> str:
+        trace = self._model_trace()
+        actual = trace.get("actual") or trace.get("model")
+        chain = trace.get("chain") or []
+        if actual:
+            fb = f" ⚠️fb{len(chain) - 1}" if len(chain) > 1 else ""
+            return f"🤖 {actual}{fb}"
+        return self._model_name()
+
+    def _refresh_model_badge(self):
+        if not hasattr(self, "_model_badge"):
+            return
+        self._model_badge.setText(self._actual_model_name())
+        trace = self._model_trace()
+        chain = trace.get("chain") or []
+        if chain:
+            self._model_badge.setToolTip("fallback链: " + " -> ".join(map(str, chain)))
+        else:
+            self._model_badge.setToolTip(self._model_name())
 
     def _add_system_notice(self, text: str):
         """Insert a small centered notice label (not tracked as a message)."""
