@@ -12,6 +12,7 @@ from pathlib import Path
 _SCRIPT_DIR = Path(__file__).parent
 _REGISTRY_PATH = _SCRIPT_DIR / "assets" / "constraints_registry.json"
 _DASHBOARD_TEMPLATE_PATH = _SCRIPT_DIR / "assets" / "audit_dashboard.html"
+_DSL_CONSTRAINTS_PATH = _SCRIPT_DIR / "assets" / "constraints_dsl.json"
 _DASHBOARD_DIR = _SCRIPT_DIR / "temp" / "dashboard"
 _DASHBOARD_HTML_PATH = _DASHBOARD_DIR / "dashboard.html"
 _AUDIT_LOG_PATH = _DASHBOARD_DIR / "audit_log.json"
@@ -82,6 +83,9 @@ def _hot_reload(force=False):
         except Exception as e:
             _source_mtime = cur_mtime
             return False, f"exec error: {e}"
+        # Inject preserved state into ns so new functions see them
+        # (new functions' __globals__ points to ns, not mod)
+        ns.update(preserved)
         # Patch: replace functions and non-preserved globals
         if mod:
             for k, v in ns.items():
@@ -207,6 +211,31 @@ def _load_registry():
     return _registry_cache
 
 
+def _normalize_tool_calls(tool_calls):
+    """Return a list of dict-like tool call records for audit robustness.
+
+    GA contexts may contain compact string tool markers in ctx["tool_calls"].
+    Audit checks assume dict records, so normalize here instead of letting one
+    malformed entry abort the whole dashboard append path.
+    """
+    if not tool_calls:
+        return []
+    if isinstance(tool_calls, dict):
+        tool_calls = [tool_calls]
+    elif not isinstance(tool_calls, (list, tuple)):
+        tool_calls = [tool_calls]
+
+    normalized = []
+    for tc in tool_calls:
+        if isinstance(tc, dict):
+            normalized.append(tc)
+        elif isinstance(tc, str):
+            normalized.append({"name": tc, "args": {}, "raw": tc})
+        else:
+            normalized.append({"name": type(tc).__name__, "args": {}, "raw": repr(tc)[:500]})
+    return normalized
+
+
 def _extract_tool_args_text(tool_calls, scope="tool_args"):
     """Flatten tool args into searchable text.
 
@@ -215,10 +244,10 @@ def _extract_tool_args_text(tool_calls, scope="tool_args"):
     """
     _CODE_EXEC = {"code_run", "shell", "bash", "web_execute_js"}
     parts = []
-    for tc in (tool_calls or []):
-        if scope == "exec_only" and tc.get("name", "") not in _CODE_EXEC:
+    for tc in _normalize_tool_calls(tool_calls):
+        if scope == "exec_only" and _coerce_tool_name(tc) not in _CODE_EXEC:
             continue
-        args = tc.get("args", {})
+        args = _coerce_tool_args(tc)
         for k, v in args.items():
             if isinstance(v, str):
                 parts.append(v)
@@ -327,6 +356,9 @@ def _extract_subagent_from_command(command):
         elif key.startswith("--bg=") and "bg" not in result:
             val = normalized.split("=", 1)[1].strip().lower()
             result["bg"] = val not in ("", "0", "false", "no")
+    # Truncate input to summary for readability
+    if "input" in result and isinstance(result["input"], str) and len(result["input"]) > 120:
+        result["input"] = result["input"][:120] + "…"
     return result
 
 
@@ -342,7 +374,30 @@ def _extract_subagent(tool_calls, turn):
                 if "subagent" in tool_name.lower():
                     direct_tools.append(tool_name)
         if direct_tools:
-            return {"source_tool": direct_tools[0], "tools": tool_names, "turn": turn}
+            result = {"source_tool": direct_tools[0], "tools": tool_names, "turn": turn}
+            # Extract structured info from direct subagent tool args
+            for tc in (tool_calls or []):
+                tn = _coerce_tool_name(tc)
+                if "subagent" not in tn.lower():
+                    continue
+                args = _coerce_tool_args(tc)
+                for src_key, dst_key in [("task", "task"), ("task_name", "task"),
+                                         ("input", "input"), ("prompt", "input"),
+                                         ("llm_no", "llm_no"), ("model", "llm_no"),
+                                         ("bg", "bg"), ("background", "bg")]:
+                    val = args.get(src_key)
+                    if val and dst_key not in result:
+                        result[dst_key] = val
+                break
+            # Truncate input to summary
+            if "input" in result and isinstance(result["input"], str) and len(result["input"]) > 120:
+                result["input"] = result["input"][:120] + "…"
+            # Fallback: use first 60 chars of input/prompt as task name if task is missing
+            if "task" not in result:
+                fallback_src = result.get("input") or ""
+                if fallback_src:
+                    result["task"] = fallback_src[:60].strip()
+            return result
 
         exec_tools = {"code_run", "shell", "bash"}
         for tc in (tool_calls or []):
@@ -448,7 +503,7 @@ def _check_context(rule, tool_calls, ctx):
 
     has_trigger = any(t in user_msg for t in _CONSULTATION_TRIGGERS)
     if not has_trigger:
-        return "pass"
+        return "skip"  # no consultation trigger → rule not applicable
 
     tool_names = {tc.get("tool_name", "") for tc in (tool_calls or [])}
     has_write = bool(tool_names & _WRITE_TOOLS)
@@ -466,16 +521,16 @@ def _check_consecutive_execution(rule, tool_calls, ctx):
     tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
     has_exec = bool(set(tool_names) & _EXEC_TOOLS)
     if not has_exec:
-        return "pass"
+        return "skip"  # no exec tools this turn → not applicable
 
     threshold = rule.get("detection", {}).get("threshold", 3)
     recent = _CONSEC_EXEC_HISTORY[-threshold:]
     if len(recent) < threshold:
-        return "pass"
+        return "skip"  # not enough history to evaluate
 
     all_exec_no_sub = all(r.get("exec") and not r.get("subagent") for r in recent)
     if not all_exec_no_sub:
-        return "pass"
+        return "pass"  # rule applicable, delegation happening → genuinely passing
     if _SUBAGENT_AVAILABLE is False:
         return "skip"  # subagent tool not in environment, cannot delegate
     if any(r.get("exemption") for r in recent) or _has_delegation_exemption(ctx):
@@ -488,16 +543,16 @@ def _check_subagent_delegation_guard(rule, tool_calls, ctx):
     tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
     has_task_exec = bool(set(tool_names) & _TASK_EXEC_TOOLS)
     if not has_task_exec:
-        return "pass"
+        return "skip"  # no task-exec tools this turn → not applicable
 
     threshold = rule.get("detection", {}).get("threshold", 3)
     recent = _CONSEC_EXEC_HISTORY[-threshold:]
     if len(recent) < threshold:
-        return "pass"
+        return "skip"  # not enough history to evaluate
 
     all_direct_task_exec = all(r.get("task_exec") and not r.get("subagent") for r in recent)
     if not all_direct_task_exec:
-        return "pass"
+        return "pass"  # rule applicable, delegation happening → genuinely passing
     if _SUBAGENT_AVAILABLE is False:
         return "skip"  # subagent tool not in environment, cannot delegate
     if any(r.get("exemption") for r in recent) or _has_delegation_exemption(ctx):
@@ -773,6 +828,8 @@ def _check_sensitive_access(det, tool_calls):
     Script check (weaker signal): require a file-access call whose *argument* is a sensitive path,
     not just co-occurrence of read_text and a sensitive name anywhere in the script.
     """
+    if not tool_calls:
+        return "skip"  # no tools this turn → not applicable
     import re
     sensitive_path_re = re.compile(
         r'(^|[\\/])mykey\.py$|(^|[\\/])\.env(\.[^\\/]*)?$|'
@@ -890,6 +947,7 @@ def _check_memory_write(det, tool_calls, ctx):
 
 def _run_checks(registry, tool_calls, ctx):
     """Run all constraint/rule checks, return list of results."""
+    tool_calls = _normalize_tool_calls(tool_calls)
     results = []
     args_text = _extract_tool_args_text(tool_calls)
     all_items = registry.get("constraints", []) + registry.get("rules", [])
@@ -898,43 +956,45 @@ def _run_checks(registry, tool_calls, ctx):
         if not item.get("active", True):
             continue
         det = item.get("detection", {})
+        if not isinstance(det, dict):
+            continue  # engine-only items handled by constraint engine, skip here
         det_type = det.get("type", "")
         status = "skip"
+        evidence = ""  # capture detection context for audit trail
 
         if det_type == "code_pattern":
             pattern = det.get("pattern", "")
             scope = det.get("scope", "tool_args")
             scoped_text = _extract_tool_args_text(tool_calls, scope)
             if scoped_text:
+                evidence = scoped_text[:300]
                 # Browser-category constraints only apply when browser tools are used
                 _BROWSER_TOOLS = {'web_execute_js', 'web_scan', 'web_navigate', 'web_click'}
                 neg_ctx = det.get("negative_context")
-                if item.get("category") == "browser":
-                    tool_names = {_coerce_tool_name(tc) for tc in (tool_calls or [])}
-                    if not tool_names & _BROWSER_TOOLS:
-                        status = "skip"
-                        found = False
-                    else:
-                        found = _check_code_pattern(pattern, scoped_text, neg_ctx)
+                tool_names = {_coerce_tool_name(tc) for tc in (tool_calls or [])}
+                if item.get("category") == "browser" and not tool_names & _BROWSER_TOOLS:
+                    found = False
+                    status = "skip"
                 else:
                     found = _check_code_pattern(pattern, scoped_text, neg_ctx)
-                # For constraints (forbidden), finding = fail
-                if found and item["id"].startswith("C"):
-                    status = "fail"
-                elif found and item["id"].startswith("R"):
-                    # R005/R006 are also "forbidden" patterns
-                    status = "fail"
-                elif not found:
-                    status = "pass"
+                    # code_pattern detectors are negative/forbidden-pattern checks.
+                    # A hit is a violation; a miss alone does not prove the rule was
+                    # applicable, so keep it as skip instead of inflating it to pass.
+                    if found:
+                        status = "fail"
+                    else:
+                        status = "skip"
             else:
-                # No relevant tools in scope → constraint not triggered → pass
-                status = "pass"
+                # No relevant tools in scope → not applicable this turn → skip
+                status = "skip"
 
         elif det_type == "tool_negative":
             status = _check_tool_negative(item, tool_calls)
+            evidence = ",".join(_coerce_tool_name(tc) for tc in (tool_calls or []))[:300]
 
         elif det_type == "sequence_check":
             status = _check_sequence(item, tool_calls)
+            evidence = ",".join(_coerce_tool_name(tc) for tc in (tool_calls or []))[:300]
 
         elif det_type == "consecutive_execution_check":
             status = _check_consecutive_execution(item, tool_calls, ctx)
@@ -944,6 +1004,7 @@ def _run_checks(registry, tool_calls, ctx):
 
         elif det_type == "context_check":
             status = _check_context(item, tool_calls, ctx)
+            evidence = (ctx.get("summary") or "")[:200]
 
         elif det_type == "manual":
             status = "skip"
@@ -951,21 +1012,39 @@ def _run_checks(registry, tool_calls, ctx):
         # ── MVP-v4 automated detection branches ──
         elif det_type == "summary_check":
             status = _check_summary_present(det, ctx)
+            evidence = (ctx.get("summary") or "")[:200]
 
         elif det_type == "sensitive_access":
             status = _check_sensitive_access(det, tool_calls)
+            # Capture accessed file paths as evidence
+            _sa_paths = []
+            for tc in (tool_calls or []):
+                p = (tc.get("args") or {}).get("path", "")
+                if p:
+                    _sa_paths.append(p)
+            evidence = ",".join(_sa_paths)[:300]
 
         elif det_type == "claim_without_evidence":
             status = _check_claim_without_evidence(det, tool_calls, ctx)
+            evidence = (ctx.get("summary") or "")[:200]
 
         elif det_type == "memory_write_check":
             status = _check_memory_write(det, tool_calls, ctx)
+            _mw_paths = []
+            for tc in (tool_calls or []):
+                if _coerce_tool_name(tc) in ("file_write", "file_patch"):
+                    p = (tc.get("args") or {}).get("path", "")
+                    if p:
+                        _mw_paths.append(p)
+            evidence = ",".join(_mw_paths)[:300]
 
         result = {
             "id": item["id"],
             "name": item["name"],
             "status": status
         }
+        if evidence:
+            result["evidence"] = evidence
         if item.get("id") == "R061":
             result.update(_r061_metadata(status, ctx))
         results.append(result)
@@ -993,7 +1072,7 @@ def _on_turn_end(ctx):
     try:
         turn = ctx.get("turn", 0)
         summary = ctx.get("summary", "")
-        tool_calls = ctx.get("tool_calls", [])
+        tool_calls = _normalize_tool_calls(ctx.get("tool_calls", []))
         response = ctx.get("response")
 
         # Extract user_message from GA instance for context_check (R003)
@@ -1081,14 +1160,91 @@ def _on_turn_end(ctx):
         # Load registry and run checks
         registry = _load_registry()
         checks = _run_checks(registry, tool_calls, ctx)
+
+        # --- DSL Constraint Engine (parallel shadow layer) ---
+        try:
+            import ga_constraint_engine as _dsl_eng
+            _dsl_constraints = _dsl_eng.load_constraints(str(_DSL_CONSTRAINTS_PATH))
+            if _dsl_constraints:
+                # Build ctx for DSL engine
+                _resp_text = ""
+                if isinstance(response, str):
+                    _resp_text = response
+                elif isinstance(response, dict):
+                    _resp_text = response.get("content", "") or json.dumps(response, ensure_ascii=False)
+                _scripts = []
+                for _tc in (tool_calls or []):
+                    if not isinstance(_tc, dict):
+                        continue
+                    _a = _tc.get("args", {})
+                    for _k in ("script", "code", "command"):
+                        if _k in _a:
+                            _scripts.append(str(_a[_k]))
+                _dsl_ctx = {
+                    "tool_calls": tool_calls or [],
+                    "response_text": _resp_text,
+                    "scripts": _scripts,
+                    "user_message": ctx.get("user_message", ""),
+                    "history": ctx.get("history", []),
+                }
+                _dsl_results = _dsl_eng.evaluate_all(_dsl_constraints, _dsl_ctx)
+                # Convert to ga_audit check format and append
+                for _dr in _dsl_results:
+                    checks.append({
+                        "id": _dr.get("constraint_id", ""),
+                        "name": _dr.get("constraint_name", ""),
+                        "status": _dr.get("status", "skip"),
+                        "evidence": _dr.get("reason", ""),
+                        "source": "dsl_engine",
+                    })
+        except Exception as _dsl_err:
+            checks.append({
+                "id": "DSL-ENGINE-ERROR",
+                "name": "DSL engine load/run error",
+                "status": "error",
+                "evidence": str(_dsl_err)[:500],
+                "source": "dsl_engine",
+            })
+
         if _has_verification_evidence(tool_calls):
             _LAST_EVIDENCE_TURN["turn"] = turn
 
         # Detect subagent usage
         tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
 
+        # Deduplicate checks: when both registry (R065) and DSL engine (REG-R065)
+        # flag the same constraint, keep only the REG- prefixed version.
+        _seen_base = {}
+        _deduped = []
+        for _c in checks:
+            _cid = _c.get("id", "")
+            _base = _cid[4:] if _cid.startswith("REG-") else _cid
+            if _base not in _seen_base:
+                _seen_base[_base] = _c
+                _deduped.append(_c)
+            else:
+                # Prefer REG- prefixed version over bare version
+                _existing = _seen_base[_base]
+                if _cid.startswith("REG-") and not _existing.get("id", "").startswith("REG-"):
+                    # Replace the bare version with REG- version
+                    _idx = _deduped.index(_existing)
+                    _deduped[_idx] = _c
+                    _seen_base[_base] = _c
+        checks = _deduped
+
         # Violations
         violations = [c for c in checks if c["status"] == "fail"]
+
+        # Build tool_calls digest for audit trail (name + truncated args)
+        tool_calls_digest = []
+        for tc in (tool_calls or []):
+            name = _coerce_tool_name(tc)
+            args = tc.get("args") or tc.get("arguments") or {}
+            digest_args = {}
+            for k, v in (args.items() if isinstance(args, dict) else []):
+                sv = str(v)
+                digest_args[k] = sv[:200] + "…" if len(sv) > 200 else sv
+            tool_calls_digest.append({"name": name, "args": digest_args})
 
         # Build event record
         event = {
@@ -1098,6 +1254,7 @@ def _on_turn_end(ctx):
             "summary": summary[:200] if summary else "",
             "model": model,
             "tools_used": tool_names,
+            "tool_calls_digest": tool_calls_digest,
             "tokens": tokens,
             "token_breakdown": token_breakdown,
             "context_breakdown": context_breakdown,
@@ -1116,8 +1273,9 @@ def _on_turn_end(ctx):
         # Audit must never crash the agent
         try:
             _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
+            import traceback as _tb
             with open(_DASHBOARD_DIR / "audit_error.log", "a", encoding="utf-8") as f:
-                f.write(f"{datetime.now().isoformat()} ERROR: {e}\n")
+                f.write(f"{datetime.now().isoformat()} ERROR: {e}\n{_tb.format_exc()}\n")
         except:
             pass
 
@@ -1157,9 +1315,28 @@ def install(agent):
         _SUBAGENT_AVAILABLE = bool(tool_names & _sa_names)
     except Exception:
         _SUBAGENT_AVAILABLE = True  # conservative: assume available
-    # Write initial registry snapshot for dashboard
+    # Write initial registry snapshot for dashboard (merged registry + DSL)
     _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
     registry = _load_registry()
+    try:
+        import ga_constraint_engine as _dsl_eng
+        _dsl_cons = _dsl_eng.load_constraints(str(_DSL_CONSTRAINTS_PATH))
+        # Convert DSL constraints to registry-like format for frontend
+        dsl_rules = []
+        for c in (_dsl_cons or []):
+            dsl_rules.append({
+                "id": c.get("id", ""),
+                "name": c.get("name", ""),
+                "description": c.get("source", ""),
+                "check_type": c.get("check_type", ""),
+                "detection": {"type": "auto"},
+                "type": "dsl"
+            })
+        registry["dsl_constraints"] = dsl_rules
+    except Exception as e:
+        registry["dsl_constraints"] = []
+        registry["dsl_load_error"] = str(e)[:200]
+    
     with open(_DASHBOARD_DIR / "constraints_snapshot.json", "w", encoding="utf-8") as f:
         json.dump(registry, f, ensure_ascii=False, indent=1)
     return True# Dashboard control API extension: local POST /api/stop calls GA native abort().
