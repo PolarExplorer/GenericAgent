@@ -1,0 +1,1048 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "description": "DSL约束定义 — 并行层，补充ga_audit已有检测",
+    "engine": "ga_constraint_engine.py"
+  },
+  "constraints": [
+    {
+      "id": "MISSING-PLAN-WORKDIR",
+      "name": "规划任务必须先创建工作目录",
+      "source": "memory/plan_sop.md:6",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "scope": "response",
+          "pattern": "(计划|规划|方案|plan|探索|收敛|拆解)"
+        },
+        "precondition": {
+          "lookback": 3,
+          "tool_names": [
+            "code_run",
+            "file_write"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MISSING-PLAN-REREAD",
+      "name": "规划执行新步骤前禁止凭记忆，必须重读plan.md",
+      "source": "memory/plan_sop.md:181",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "scope": "response",
+          "pattern": "(下一步|继续|开始执行|实施|验证|修改)"
+        },
+        "precondition": {
+          "lookback": 2,
+          "tool_names": [
+            "file_read"
+          ]
+        }
+      }
+    },
+    {
+      "id": "MISSING-TOOL-DISPATCH-TYPE",
+      "name": "工具分发前必须先判定任务类型",
+      "source": "memory/tool_dispatch_sop.md:18",
+      "check_type": "llm_judge",
+      "params": {
+        "scope": "response",
+        "trigger": "(使用|调用|分发|subagent|Codex|Claude|工具)",
+        "criteria": "若响应涉及工具/模型分发决策，是否先明确判定任务属于表达型、工程执行型或信息收集型，并据此选择工具。"
+      }
+    },
+    {
+      "id": "MISSING-VISION-ENUM-WINDOW",
+      "name": "调用vision前必须枚举并确认窗口",
+      "source": "memory/vision_sop.md:7",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "scope": "response",
+          "pattern": "(?:vision|screenshot|截图|capture_screen|grab_screen|ImageGrab)",
+          "tool_names": [
+            "web_execute_js",
+            "code_run"
+          ]
+        },
+        "precondition": {
+          "lookback": 2,
+          "response_pattern": "(枚举窗口|窗口标题|pygetwindow|win32gui|activate|前台)"
+        }
+      }
+    },
+    {
+      "id": "MISSING-PS-CAT-TYPE",
+      "name": "禁止PowerShell cat/type读取文件，必须file_read",
+      "source": "global_mem_insight/RULES",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?:^|[;&|\\n\\r])\\s*(?:cat|type)\\s+[A-Za-z0-9_./\\\\:-]+"
+      }
+    },
+    {
+      "id": "MISSING-LJQ-ACTIVATE",
+      "name": "键鼠/物理模拟前必须激活窗口",
+      "source": "memory/ljqCtrl_sop.md:3,41",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "scope": "response",
+          "pattern": "(?:ljqCtrl\\.|物理模拟|键鼠操作|pyautogui\\.\\w+\\()",
+          "tool_names": [
+            "code_run"
+          ]
+        },
+        "precondition": {
+          "lookback": 2,
+          "response_pattern": "(activate\\(|激活窗口|前台|窗口已激活|置于前台)"
+        }
+      }
+    },
+    {
+      "id": "MISSING-CODE-HYPOTHESIS",
+      "name": "编码前必须先陈述假设和方案",
+      "source": "global_mem_insight/RULES#15",
+      "check_type": "llm_judge",
+      "params": {
+        "scope": "all",
+        "trigger": "(file_patch|file_write|修改代码|实现|编码|patch)",
+        "criteria": "若本轮进行非trivial编码/代码修改，是否在修改前陈述了关键假设和实施方案；若存在歧义是否先询问。"
+      }
+    },
+    {
+      "id": "MISSING-MEM-L0-READ",
+      "name": "写记忆前必须读META-SOP(L0)",
+      "source": "assets/insight_fixed_structure.txt:2",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "scope": "all",
+          "pattern": "(memory/.*\\.(md|txt)|global_mem|insight|记忆).*(file_write|file_patch|写入|修改)"
+        },
+        "precondition": {
+          "lookback": 3,
+          "tool_names": [
+            "file_read"
+          ],
+          "response_pattern": "(META-SOP|memory_management_sop|L0)"
+        }
+      }
+    },
+    {
+      "id": "REG-C001",
+      "name": "禁用 pyautogui",
+      "source": "ljqCtrl_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?:^|[\\n;\\\"'])\\s*(?:import\\s+pyautogui|from\\s+pyautogui)|pyautogui\\.\\w+",
+        "negative_context": "(?:pattern\\s*[=:].{0,80}|#.{0,80}|[\\\"'`]\\s*\\+\\s*[\\\"'`])"
+      }
+    },
+    {
+      "id": "REG-C002",
+      "name": "gpt-image-2 必须用 /gpt 端点",
+      "source": "image_gen_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "gpt-image"
+      }
+    },
+    {
+      "id": "REG-C004",
+      "name": "密钥文件仅引用不读取/移动",
+      "source": "CONSTITUTION #7",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?i)open\\s*\\([^)]*(?:key|secret|token|password|\\.env|credentials|api_key)",
+        "description": "检测脚本中直接open读取密钥/凭证文件"
+      }
+    },
+    {
+      "id": "REG-C006",
+      "name": "memory 模块直接 import",
+      "source": "RULES #3",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?m)^\\s*(?:from\\s+\\w+(?:\\.\\w+)*\\.memory\\b|import\\s+\\w+(?:\\.\\w+)*\\.memory\\b)",
+        "description": "检测给 memory 模块添加虚假包前缀的 import"
+      }
+    },
+    {
+      "id": "REG-C020",
+      "name": "密钥、token、密码不进代码",
+      "source": "用户全局CLAUDE.md",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?:api_key|secret_key|password|token)\\s*=\\s*['\\\"][A-Za-z0-9_\\-]{16,}",
+        "description": "检测硬编码密钥/token（≥16字符的字面值赋值）"
+      }
+    },
+    {
+      "id": "REG-C021",
+      "name": "git push 不自动执行，等用户明确指令",
+      "source": "用户全局CLAUDE.md",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "git push"
+      }
+    },
+    {
+      "id": "REG-C023",
+      "name": "图片生成必须使用 gpt-image-2 工具链",
+      "source": "image_gen_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?i)\\b(midjourney|dall[- ]?e|stable\\s*diffusion|sdxl|comfyui|automatic1111)\\b",
+        "description": "图片生成默认必须用gpt-image-2/image_gen_utils，检测替代工具坏味道"
+      }
+    },
+    {
+      "id": "REG-C025",
+      "name": "Codex exec 不暴露 image_gen，需用SDK直接调用",
+      "source": "image_gen_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?is)\\bcodex\\b.*\\bimage_gen\\b|\\bimage_gen\\b.*\\bcodex\\b",
+        "description": "检测在 Codex exec/提示中期待内置 image_gen 能力"
+      }
+    },
+    {
+      "id": "REG-C026",
+      "name": "高质量大图生成需后台跑并轮询文件",
+      "source": "image_gen_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?is)\\A(?=.*(?:gpt-image-2|image_gen|generate_image))(?=.*(?:1536x1024|1024x1536|quality\\s*=\\s*[\\'\\\"]?high|high))(?!.*(?:background|subprocess|Popen|thread|poll|while\\s+.*exists|timeout\\s*=\\s*(?:2[4-9][0-9]|[3-9][0-9]{2,}))).*",
+        "description": "检测高质量大图生成缺后台/轮询/长timeout的超时风险"
+      }
+    },
+    {
+      "id": "REG-C033",
+      "name": "修改记忆文件只能小范围 patch",
+      "source": "memory_management_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tools",
+        "pattern": "memory[\\\\/]",
+        "negative_context": "(?:新建|create|mode[\"']?\\s*:\\s*[\"']?append)",
+        "description": "memory/下已有文件只能用file_patch修改，禁止file_write覆盖（新建文件除外）",
+        "tool_names": [
+          "file_write"
+        ]
+      }
+    },
+    {
+      "id": "REG-C035",
+      "name": "自主模式禁止读取密钥和修改核心代码",
+      "source": "autonomous_operation_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?i)(?:autonomous|自主).*(?:open|read|file_read).*(?:key|secret|token|密码|密钥)|(?:open|read|file_read).*(?:key|secret|token|密码|密钥).*(?:autonomous|自主)",
+        "description": "自主模式下检测读取密钥文件的行为"
+      }
+    },
+    {
+      "id": "REG-C039",
+      "name": "窗口客户区点击需用 ClientToScreen 转换",
+      "source": "ljqCtrl_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?s)\\A(?!.*ClientToScreen)(?=.*GetWindowRect)(?=.*ljqCtrl\\.).*",
+        "description": "检测基于 GetWindowRect 直接 ljqCtrl 点击且缺 ClientToScreen 转换"
+      }
+    },
+    {
+      "id": "REG-C043",
+      "name": "Turnstile token 获取后必须立即使用",
+      "source": "turnstile_bypass_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?is)turnstile.*token.*(?:cache|cached|save|write|json\\.dump|pickle|shelve|ttl|reuse|缓存|保存|复用)",
+        "description": "检测 Turnstile token 被缓存/保存/复用的坏味道"
+      }
+    },
+    {
+      "id": "REG-C044",
+      "name": "跨 tab CDP 操作必须显式 tabId 或先查 tabs",
+      "source": "tmwebdriver_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?is)\\A(?=.*(?:cdp|Target\\.|Runtime\\.evaluate|Page\\.))(?!.*(?:tabId|targetId|list_tabs|get_tabs|Target\\.getTargets)).*",
+        "description": "检测CDP/跨tab操作缺显式tabId/targetId或tabs查询"
+      }
+    },
+    {
+      "id": "REG-C045",
+      "name": "autofill 保护值读取前必须 Page.bringToFront",
+      "source": "tmwebdriver_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?is)\\A(?=.*(?:autofill|password|credentials|chrome://settings|navigator\\.credentials))(?!.*Page\\.bringToFront).*",
+        "description": "检测autofill/credential读取缺Page.bringToFront"
+      }
+    },
+    {
+      "id": "REG-C047",
+      "name": "CDP Proxy eval body 必须是原始 JS 字符串",
+      "source": "web_access_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?is)(?:/eval|cdp-proxy).*\\bexpression\\b|\\bexpression\\b.*(?:/eval|cdp-proxy)",
+        "description": "检测 CDP Proxy /eval 使用 JSON expression 对象而非原始 JS 字符串"
+      }
+    },
+    {
+      "id": "REG-C049",
+      "name": "Google 搜索使用 web 工具并遵循 web_setup",
+      "source": "research_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?i)\\b(duckduckgo|duckduckgo\\.com|ddg\\b|bing\\.com/search)",
+        "description": "研究搜索场景检测 DuckDuckGo/Bing 等非 Google 替代入口（低风险负向检测）"
+      }
+    },
+    {
+      "id": "REG-C051",
+      "name": "docx 图片必须读取为 Buffer 不能传路径",
+      "source": "office_doc_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?is)(?:ImageRun|Media\\.addImage).*\\bdata\\s*[:=]\\s*[\\'\\\"][^\\'\\\"]+\\.(?:png|jpe?g|gif|webp)[\\'\\\"]",
+        "description": "检测 docx 图片 data 直接传路径字符串而非 Buffer"
+      }
+    },
+    {
+      "id": "REG-C052",
+      "name": "ReportLab 中文 PDF 必须注册中文字体",
+      "source": "office_doc_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?is)reportlab(?!.*(?:TTFont|pdfmetrics\\.registerFont|registerFont)).*(?:中文|Chinese|CJK|SimSun|SimHei|微软雅黑|Microsoft YaHei|NotoSansCJK)",
+        "description": "检测 ReportLab 中文 PDF 相关代码未注册中文字体"
+      }
+    },
+    {
+      "id": "REG-R001",
+      "name": "搜索文件必须用 es.exe",
+      "source": "RULES #1",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?:Get-ChildItem -Recurse)|(?:dir /s)",
+        "description": "搜索文件必须用 es.exe",
+        "required_hint": "es.exe"
+      }
+    },
+    {
+      "id": "REG-R003",
+      "name": "征询措辞时禁止执行工具",
+      "source": "RULES #13",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "pattern": "(?:你看)|(?:需要吗)|(?:怎么样)|(?:建议)",
+        "description": "用户使用征询措辞时，检测本轮是否包含写入工具调用",
+        "secondary_check": {
+          "scope": "tool_calls",
+          "forbidden_tools": [
+            "file_write",
+            "file_patch",
+            "code_run"
+          ]
+        }
+      }
+    },
+    {
+      "id": "REG-R005",
+      "name": "禁用 mimo-v2.5-pro",
+      "source": "vision_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "mimo-v2.5-pro"
+      }
+    },
+    {
+      "id": "REG-R006",
+      "name": "禁止全屏截图",
+      "source": "vision_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "screenshot.*full"
+      }
+    },
+    {
+      "id": "REG-R008",
+      "name": "禁止无条件杀 python 进程",
+      "source": "RULES #5",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "taskkill.*python"
+      }
+    },
+    {
+      "id": "REG-R015",
+      "name": "搜索网页优先 Google，禁 DuckDuckGo",
+      "source": "RULES #1",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?i)\\b(duckduckgo|duckduckgo\\.com|ddg\\b)",
+        "description": "检测使用 DuckDuckGo/DDG 替代 Google 搜索"
+      }
+    },
+    {
+      "id": "REG-R020",
+      "name": "GUI 状态优先枚举窗口标题",
+      "source": "RULES #6",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?is)\\A(?=.*(?:screenshot|GetForegroundWindow|FindWindow|SetForegroundWindow|click_at|mouse_click|pyautogui\\..*click|ljqCtrl|窗口操作|前台窗口|activate.*window))(?!.*(?:EnumWindows|win32gui|GetWindowText|枚举窗口|窗口标题)).*",
+        "description": "检测GUI/窗口状态操作缺窗口标题枚举证据",
+        "negative_context": "(?:html|javascript|js|web_execute|innerHTML|querySelector|addEventListener|button|href|onclick)"
+      }
+    },
+    {
+      "id": "REG-R021",
+      "name": "Web JS 输入用原生 setter + 事件链",
+      "source": "RULES #7",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?s)\\A(?!.*(?:dispatchEvent|InputEvent|new\\s+Event\\s*\\(\\s*[\\'\\\"](?:input|change)[\\'\\\"])).*(?=\\.value\\s*=).*",
+        "description": "检测Web JS直接设置.value但缺少dispatchEvent/InputEvent/new Event(input|change)事件链"
+      }
+    },
+    {
+      "id": "REG-R023",
+      "name": "读 SOP 禁凭印象",
+      "source": "RULES #8",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "trigger": "(?:按照|根据|参考|遵循|依据).*(?:_sop|SOP)",
+        "pattern": "(?is)\\A(?=.*(?:_sop|SOP|\\.md))(?!.*(?:file_read|open\\s*\\(|Path\\s*\\(|read_text|memory[/\\\\]|\\.md)).*",
+        "negative_context": "(?:file_read|memory[\\\\/]|已读|已查|上文已|前文已|刚读过)",
+        "description": "声称按SOP执行但当轮无file_read且前文无读取证据时触发（仅检查response）"
+      }
+    },
+    {
+      "id": "REG-R030",
+      "name": "每次回复必须包含 summary",
+      "source": "行动规范",
+      "check_type": "pattern_required",
+      "params": {
+        "scope": "response",
+        "pattern": "<summary>.*</summary>",
+        "description": "每次回复必须包含<summary>标签"
+      }
+    },
+    {
+      "id": "REG-R032",
+      "name": "不可逆操作先询问用户",
+      "source": "行动原则",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?is)\\b(rm\\s+-rf|Remove-Item\\b[^\\n]*(?:-Recurse|-r)[^\\n]*-Force|del\\s+/[sq]|rmdir\\s+/[sq]|shutil\\.rmtree|os\\.remove\\s*\\(|Path\\([^)]*\\)\\.unlink\\s*\\(|file_write\\b[^\\n]*(?:overwrite|mode\\s*[:=]\\s*[\\\"\\']overwrite))",
+        "description": "检测删除/覆盖等不可逆操作坏味道，需先询问用户"
+      }
+    },
+    {
+      "id": "REG-R041",
+      "name": "禁止为跑通而注释掉报错",
+      "source": "用户全局CLAUDE.md",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "#\\s*(?:import|from|raise|assert)\\b",
+        "description": "检测被注释掉的import/raise/assert（疑似为跑通而注释报错）"
+      }
+    },
+    {
+      "id": "REG-R042",
+      "name": "commit message 用英文且简洁表达意图",
+      "source": "用户全局CLAUDE.md",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?is)git\\s+commit\\b[^\\n]*-m\\s*[\\\"\\'][^\\\"\\']*[\\u4e00-\\u9fff][^\\\"\\']*[\\\"\\']",
+        "description": "检测git commit message含中文，要求英文简洁表达意图"
+      }
+    },
+    {
+      "id": "REG-R053",
+      "name": "Codex/GPT-5.5 结果必须测试或截图验证闭环",
+      "source": "model_dispatch_sop",
+      "check_type": "llm_judge",
+      "params": {
+        "trigger_pattern": "(?i)(?:完成|修复|搞定|可用|验证通过|测试通过|PASS|WORKING|SUCCESS)",
+        "required_evidence": "(?i)(?:截图|日志|输出|结果|exit.code|PASS|输出如下|验证结果)",
+        "description": "声明完成/修复/可用时，必须有截图/日志/输出等证据支撑"
+      }
+    },
+    {
+      "id": "REG-R059",
+      "name": "自主报告路径在 temp/autonomous_reports",
+      "source": "autonomous_operation_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?i)(?:^|[^\\w./\\\\-])autonomous_reports[\\\\/]",
+        "description": "检测未使用 ./autonomous_reports/ 的裸 autonomous_reports 路径"
+      }
+    },
+    {
+      "id": "REG-R060",
+      "name": "飞书 CLI 在 Windows 必须 shell=True",
+      "source": "global_mem.txt",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?:subprocess|Popen)\\s*(?:\\.\\w+)?\\s*\\(.*lark(?!.*shell\\s*=\\s*True)",
+        "description": "飞书CLI在Windows必须shell=True"
+      }
+    },
+    {
+      "id": "REG-R062",
+      "name": "透明背景图片生成需降级 gpt-image-1.5",
+      "source": "global_mem.txt",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?is)(?:gpt-image-2.*(?:transparent|透明|alpha|背景透明)|(?:transparent|透明|alpha|背景透明).*gpt-image-2)",
+        "description": "检测透明背景图片仍使用 gpt-image-2"
+      }
+    },
+    {
+      "id": "REG-R064",
+      "name": "写作禁止教科书式开头",
+      "source": "writing_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tool_args",
+        "pattern": "(?:在当今|随着(?:技术|科技|时代|社会|互联网|人工智能)|在这个(?:快速发展|日新月异)的时代)",
+        "description": "检测教科书式写作开头/套话"
+      }
+    },
+    {
+      "id": "REG-R065",
+      "name": "定时任务可设置 max_delay_hours 防过时执行",
+      "source": "scheduled_task_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?s)\\A(?!.*max_delay_hours)(?=.*(?:scheduled_task|schedule_task|create_task|register_task|schtasks|add_task)).*",
+        "description": "检测创建/注册定时任务时未设置 max_delay_hours"
+      }
+    },
+    {
+      "id": "REG-C003",
+      "name": "改自身源码前必须请示",
+      "source": "CONSTITUTION:1",
+      "check_type": "composite",
+      "params": {
+        "operator": "AND",
+        "checks": [
+          {
+            "check_type": "pattern_forbidden",
+            "params": {
+              "scope": "tools",
+              "tool_names": [
+                "file_write",
+                "file_patch"
+              ],
+              "pattern": "\"path\"\\s*:\\s*\"[^\"]*(?:GenericAgent[\\\\/]+)(?![\\\\/]*temp[\\\\/])[^\"]*\"",
+              "description": "检测写入GA根目录(排除temp/)，仅匹配写操作工具"
+            }
+          },
+          {
+            "check_type": "pattern_forbidden",
+            "params": {
+              "scope": "user",
+              "pattern": "(?s)\\A(?!.*(?:解决|修复|实现|创建|添加|修改|改[一下掉好完吧]?|优化|重构|patch|fix|implement|create|add|update|refactor|改自身|改GA|改源码|写入|接入|hook|补丁|升级|迁移|整合|集成|同意|批准|可以|好的|去做|执行|修[吧它们这那个]?|搞定|处理|弄[好一下]?|上[吧$]|开[搞干始]|do it|go ahead|proceed|yes|ok|确认|没问题|行[吧$]?)).*",
+              "description": "用户消息中不含明确操作授权词（回溯5轮历史user msg）",
+              "lookback": 5
+            }
+          }
+        ]
+      },
+      "severity": "critical",
+      "description": "file_write/file_patch目标在GA根目录(排除temp/)且用户无明确操作指令时触发。"
+    },
+    {
+      "id": "REG-C014",
+      "name": "代码中禁止中文变量名",
+      "source": "C014",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "exec_only",
+        "pattern": "(?:def|class|import)\\s+[\\u4e00-\\u9fff]|(?<![\"'\\w])[\\u4e00-\\u9fff]+\\s*=\\s*|for\\s+[\\u4e00-\\u9fff]",
+        "description": "检测代码中使用中文作为变量名/函数名/类名（排除引号内字面量）"
+      },
+      "severity": "low"
+    },
+    {
+      "id": "REG-C015",
+      "name": "不要谄媚",
+      "source": "C015",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "pattern": "这是[一个]?(?:很好|非常好|绝妙|精彩)的(?:问题|想法|建议|观点)|你说得?(?:太对|非常对|很对|完全正确)|(?:太棒了|非常棒|真是太好了|好极了)|你的(?:想法|思路|见解)(?:很|非常|太)(?:好|棒|赞|妙)",
+        "description": "匹配谄媚短语"
+      },
+      "severity": "medium"
+    },
+    {
+      "id": "REG-R037",
+      "name": "除真实风险外不要问你确定吗",
+      "source": "R037",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "pattern": "你确定(?:吗|要)?|确认(?:一下)?(?:吗|要)?(?:继续|执行|操作)",
+        "negative_context": "(?:删除|格式化|不可逆|覆盖|清空|drop|truncate|rm\\s+-rf|危险)",
+        "description": "非危险操作时禁止问'你确定吗'。negative_context排除真实风险场景。"
+      },
+      "severity": "low"
+    },
+    {
+      "id": "REG-R044",
+      "name": "人物图生成用外貌特征替代名人姓名",
+      "source": "R044",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "tools",
+        "pattern": "(?:generate|image|图|画|生成).*(?:Trump|Biden|习近平|Musk|马斯克|特朗普|拜登|Obama|奥巴马|Taylor Swift|泰勒)",
+        "description": "图片生成prompt中禁止直接使用名人姓名"
+      },
+      "severity": "medium"
+    },
+    {
+      "id": "REG-C031",
+      "name": "写入长期记忆必须来自成功工具证据",
+      "source": "C031",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "tool_names": [
+            "file_write",
+            "file_patch"
+          ],
+          "pattern": "memory[\\\\/](?:global_mem|.*_sop)",
+          "scope": "path_only"
+        },
+        "precondition": {
+          "lookback": 5,
+          "tool_names": [
+            "code_run",
+            "web_scan",
+            "web_execute_js",
+            "file_read"
+          ]
+        }
+      },
+      "severity": "high",
+      "description": "写入L1/L2/L3记忆文件前，近5轮必须有工具调用获取证据"
+    },
+    {
+      "id": "REG-C034",
+      "name": "L2/L3变化必须同步L1索引",
+      "source": "C034",
+      "check_type": "sequence_check",
+      "params": {
+        "steps": [
+          {
+            "tool_names": [
+              "file_write",
+              "file_patch"
+            ],
+            "pattern": "memory[\\\\/](?!global_mem_insight).*(?:_sop|global_mem\\.txt)"
+          },
+          {
+            "tool_names": [
+              "file_write",
+              "file_patch"
+            ],
+            "pattern": "memory[\\\\/]global_mem_insight"
+          }
+        ],
+        "trigger_step": 0,
+        "description": "修改L2/L3后应在后续轮次同步L1(global_mem_insight)"
+      },
+      "severity": "medium",
+      "description": "修改L2/L3记忆后必须同步更新L1极简索引"
+    },
+    {
+      "id": "REG-R007",
+      "name": "No evidence, no claim",
+      "source": "R007/verify_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "pattern": "(?:已(?:修复|解决|完成|搞定|修好)|(?:问题|bug|错误)已(?:消除|清除|不存在))",
+        "negative_context": "(?:验证|测试|确认|检查|运行).*(?:通过|成功|正常)",
+        "description": "宣称修复/完成但前文无验证证据时触发"
+      },
+      "severity": "high"
+    },
+    {
+      "id": "REG-R004",
+      "name": "连续执行≥3轮必须反思",
+      "source": "CONSTITUTION:3 / R004",
+      "check_type": "consecutive_execution",
+      "params": {
+        "lookback": 3,
+        "threshold": 3,
+        "reflection_signals": [
+          "(?:反思|回顾|review|rethink|重新考虑|换方案|换个思路)",
+          "update_working_checkpoint",
+          "(?:阶段|phase|step)\\s*\\d",
+          "(?:方案|plan|策略|strategy|分析|诊断)"
+        ]
+      },
+      "severity": "high",
+      "description": "连续≥3轮纯工具执行无反思/规划/checkpoint时触发"
+    },
+    {
+      "id": "REG-R061",
+      "name": "分发纪律-连续同类执行须反思是否该分发",
+      "source": "R061/RULES:14",
+      "check_type": "consecutive_execution",
+      "params": {
+        "lookback": 3,
+        "threshold": 3,
+        "reflection_signals": [
+          "(?:分发|dispatch|subagent|委托|delegate)",
+          "update_working_checkpoint",
+          "(?:反思|是否该|should I)"
+        ]
+      },
+      "severity": "medium",
+      "description": "连续≥3轮同类执行任务须停下反思是否该分发给subagent"
+    },
+    {
+      "id": "REG-R024",
+      "name": "物理模拟后必须确认结果",
+      "source": "R024/RULES:4",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "tool_names": [
+            "web_execute_js"
+          ],
+          "pattern": "(?:ljqCtrl\\.|物理模拟|键鼠|\\.click\\(\\)|\\.submit\\(\\)|dispatchEvent\\()",
+          "scope": "exec_only"
+        },
+        "precondition": {
+          "lookback": 2,
+          "response_pattern": "(?:确认|验证|检查|截图|scan|web_scan)"
+        }
+      },
+      "severity": "medium",
+      "description": "执行点击/输入等物理模拟后，后续轮次须有确认动作"
+    },
+    {
+      "id": "REG-R009",
+      "name": "决策前查记忆有SOP必用",
+      "source": "CONSTITUTION:2 / R009",
+      "check_type": "sequence_check",
+      "params": {
+        "steps": [
+          {
+            "tool_names": [
+              "file_read"
+            ],
+            "pattern": "memory[\\\\/]"
+          },
+          {
+            "pattern": "(?s)(?=.*(?:_sop|SOP|memory[\\\\/]|记忆|约束引擎|constraint_engine|scheduled_task|autonomous)).*(?:开始|执行|实施|implement|start)"
+          }
+        ],
+        "trigger_step": 1,
+        "lookback": 10,
+        "description": "涉及SOP领域的操作前应先读取memory/（扩大回溯窗口到10轮）"
+      },
+      "severity": "low",
+      "description": "涉及SOP关键词的操作前应先file_read memory/（lookback=10）"
+    },
+    {
+      "id": "REG-R049",
+      "name": "子任务必须标注llm_no",
+      "source": "R049/RULES:14",
+      "check_type": "pattern_required",
+      "params": {
+        "trigger": "(?:subagent|sub_agent)\\s*(?:\\(|调用|执行|分发|delegate)",
+        "scope": "all",
+        "pattern": "llm_no\\s*[=:]\\s*\\d"
+      },
+      "severity": "medium",
+      "description": "subagent实际调用时必须包含llm_no参数（讨论dispatch概念不触发）"
+    },
+    {
+      "id": "REG-C048",
+      "name": "联网三层降级curl→web→CDP",
+      "source": "C048/web_access_sop",
+      "check_type": "sequence_check",
+      "params": {
+        "steps": [
+          {
+            "tool_names": [
+              "code_run"
+            ],
+            "pattern": "(?:curl|requests\\.get|httpx)"
+          },
+          {
+            "tool_names": [
+              "web_scan",
+              "web_execute_js"
+            ]
+          }
+        ],
+        "trigger_step": 1,
+        "description": "使用web工具前应先尝试curl/requests"
+      },
+      "severity": "low",
+      "description": "联网操作应遵循三层降级：curl→框架web工具→CDP"
+    },
+    {
+      "id": "REG-C018",
+      "name": "新项目先建规则与结构约定",
+      "source": "C018",
+      "check_type": "sequence_check",
+      "params": {
+        "steps": [
+          {
+            "tool_names": [
+              "file_write"
+            ],
+            "pattern": "(?:CLAUDE\\.md|README|rules|\\.cursorrules|CONVENTIONS)"
+          },
+          {
+            "tool_names": [
+              "file_write"
+            ],
+            "pattern": "(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)$",
+            "exclude_pattern": "(?:GenericAgent|temp)[\\\\/]"
+          }
+        ],
+        "trigger_step": 1,
+        "description": "新项目写代码前应先创建规则/结构文件（排除GA自身和temp目录）"
+      },
+      "severity": "low",
+      "description": "新项目先建CLAUDE.md/README等规则文件再写代码。仅对temp/外新目录触发。"
+    },
+    {
+      "id": "REG-C027",
+      "name": "UI开发走mockup流程",
+      "source": "C027/ui_dev_sop",
+      "check_type": "sequence_check",
+      "params": {
+        "steps": [
+          {
+            "pattern": "(?:image_gen|mockup|设计稿|gpt-image)"
+          },
+          {
+            "tool_names": [
+              "file_write"
+            ],
+            "pattern": "(?:\\.html|\\.css|\\.vue|\\.tsx|\\.jsx)$",
+            "exclude_pattern": "(?:GenericAgent|temp)[\\\\/]"
+          }
+        ],
+        "trigger_step": 1,
+        "description": "UI文件写入前应有mockup/设计稿生成（排除GA自身和temp目录）"
+      },
+      "severity": "low",
+      "description": "UI开发应先生成mockup再编码还原。仅对外部项目UI文件触发。"
+    },
+    {
+      "id": "REG-R040",
+      "name": "改完代码跑test/lint/build",
+      "source": "R040",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "tool_names": [
+            "file_write",
+            "file_patch"
+          ],
+          "pattern": "\"path\"\\s*:\\s*\"[^\"]*(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)\"",
+          "scope": "tools"
+        },
+        "precondition": {
+          "lookback": 10,
+          "tool_names": [
+            "code_run"
+          ],
+          "response_pattern": "(?:test|lint|build|pytest|vitest|eslint|tsc|cargo|验证|verify|check|passed|通过|成功|✅)"
+        },
+        "description": "修改代码文件后应在后续轮次运行测试/lint/build（扩大回溯窗口到10轮）"
+      },
+      "severity": "low",
+      "description": "修改代码文件后应在后续轮次运行测试/lint/build"
+    },
+    {
+      "id": "REG-R022",
+      "name": "web_scan空结果禁首扫定论",
+      "source": "R022/RULES:7",
+      "check_type": "composite",
+      "params": {
+        "operator": "AND",
+        "checks": [
+          {
+            "check_type": "duplicate_check",
+            "params": {
+              "scope": "tool_calls",
+              "tool_name": "web_scan",
+              "lookback": 3,
+              "min_count": 1
+            }
+          },
+          {
+            "check_type": "pattern_forbidden",
+            "params": {
+              "scope": "response",
+              "pattern": "(?:页面为空|没有内容|无法获取|空白页面|scan结果为空).{0,50}(?:所以|因此|说明|表明)"
+            }
+          }
+        ]
+      },
+      "severity": "medium",
+      "description": "web_scan返回空/不全时应稍等再扫，禁止首扫即下定论"
+    },
+    {
+      "id": "REG-R033",
+      "name": "失败后禁无新信息重复操作",
+      "source": "R033/CONSTITUTION:3",
+      "check_type": "duplicate_check",
+      "params": {
+        "scope": "tool_calls",
+        "lookback": 3,
+        "min_count": 2,
+        "check_failure": true,
+        "description": "同一工具+相似参数连续调用≥2次且前次失败"
+      },
+      "severity": "high",
+      "description": "工具调用失败后，禁止用相同参数无新信息地重复调用"
+    },
+    {
+      "id": "REG-R031",
+      "name": "需求未完成必须有工具调用",
+      "source": "R031/RULES",
+      "check_type": "output_check",
+      "params": {
+        "trigger": ".*",
+        "require_any": [
+          {
+            "scope": "tool_calls",
+            "min_count": 1
+          },
+          {
+            "scope": "response",
+            "pattern": "(?:完成|done|已.*完成|等待.*确认|你.*(?:看|觉得|需要|确认)|建议.*(?:你|您))"
+          }
+        ],
+        "description": "回复中须有工具调用，或明确表示完成/等待用户"
+      },
+      "severity": "low",
+      "description": "用户需求未完成时回复必须包含工具调用"
+    },
+    {
+      "id": "REG-C036",
+      "name": "自主模式高风险操作须写报告",
+      "source": "C036/autonomous_operation_sop",
+      "check_type": "composite",
+      "params": {
+        "operator": "AND",
+        "checks": [
+          {
+            "check_type": "pattern_required",
+            "params": {
+              "trigger": "(?:autonomous|自主模式|无人值守)",
+              "scope": "all",
+              "pattern": "(?:pip install|npm install|apt|rm -rf|del /|外部API|api_key)"
+            }
+          },
+          {
+            "check_type": "precondition",
+            "params": {
+              "action": {
+                "pattern": "(?:pip install|npm install|rm -rf|外部API)",
+                "scope": "tools"
+              },
+              "precondition": {
+                "lookback": 5,
+                "response_pattern": "(?:报告|report|记录|log|写入.*日志)"
+              }
+            }
+          }
+        ]
+      },
+      "severity": "medium",
+      "description": "自主模式下执行高风险操作(安装/删除/外部API)须写报告"
+    },
+    {
+      "id": "REG-R050",
+      "name": "纯编码子任务走llm_no=7",
+      "source": "R050/RULES:14/model_dispatch_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "pattern": "(?:subagent|sub_agent|委托).{0,100}(?:编码|coding|实现|implement|写代码|code).{0,100}llm_no\\s*[=:]\\s*(?!7\\b)\\d+"
+      },
+      "severity": "medium",
+      "description": "编码类subagent必须指定llm_no=7"
+    },
+    {
+      "id": "REG-R051",
+      "name": "信息收集子任务走llm_no=6",
+      "source": "R051/RULES:14/model_dispatch_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "pattern": "(?:subagent|sub_agent|委托).{0,100}(?:信息收集|research|调研|搜索|search|查找资料).{0,100}llm_no\\s*[=:]\\s*(?!6\\b)\\d+"
+      },
+      "severity": "medium",
+      "description": "信息收集类subagent必须指定llm_no=6"
+    },
+    {
+      "id": "REG-R052",
+      "name": "批量文档处理走llm_no=6",
+      "source": "R052/RULES:14/model_dispatch_sop",
+      "check_type": "pattern_forbidden",
+      "params": {
+        "scope": "response",
+        "pattern": "(?:subagent|sub_agent|委托).{0,100}(?:批量|文档处理|batch|bulk|大量文件).{0,100}llm_no\\s*[=:]\\s*(?!6\\b)\\d+"
+      },
+      "severity": "medium",
+      "description": "批量文档处理类subagent必须指定llm_no=6"
+    }
+  ]
+}
