@@ -8,6 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agent_loop import BaseHandler, StepOutcome, json_default
 from memory.mem_manager import compress_working_memory
+from ga_dispatch_gate import DispatchGate
 
 def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop_signal=[]):
     """代码执行器
@@ -268,6 +269,14 @@ class GenericAgentHandler(BaseHandler):
         self.history_info = last_history if last_history else []
         self.code_stop_signal = []
         self._done_hooks = []
+        self._dispatch_gate = DispatchGate()
+
+    def _check_dispatch_gate(self, tool_name, args):
+        """Check dispatch gate; returns StepOutcome if blocked, else None."""
+        allowed, reason = self._dispatch_gate.check_tool(tool_name, args)
+        if not allowed:
+            return StepOutcome(reason, next_prompt="\n" + reason + "\n")
+        return None
 
     def _get_abs_path(self, path):
         if not path: return ""
@@ -280,6 +289,8 @@ class GenericAgentHandler(BaseHandler):
 
     def do_code_run(self, args, response):
         '''执行代码片段，有长度限制，不允许代码中放大量数据，如有需要应当通过文件读取进行。'''
+        _blocked = self._check_dispatch_gate('code_run', args)
+        if _blocked: return _blocked
         code_type = args.get("type", "python")
         code = args.get("code") or args.get("script")
         if not code:
@@ -326,6 +337,8 @@ class GenericAgentHandler(BaseHandler):
     
     def do_web_execute_js(self, args, response):
         '''web情况下的优先使用工具，执行任何js达成对浏览器的*完全*控制。支持将结果保存到文件供后续读取分析。'''
+        _blocked = self._check_dispatch_gate('web_execute_js', args)
+        if _blocked: return _blocked
         script = args.get("script", "") or self._extract_code_block(response, "javascript")
         if not script: return StepOutcome("[Error] Script missing. Use ```javascript block or 'script' arg.", next_prompt="\n")
         abs_path = self._get_abs_path(script.strip())
@@ -353,8 +366,9 @@ class GenericAgentHandler(BaseHandler):
         return StepOutcome(smart_format(result, max_str_len=8000), next_prompt=next_prompt)
     
     def do_file_patch(self, args, response):
+        _blocked = self._check_dispatch_gate('file_patch', args)
+        if _blocked: return _blocked
         path = self._get_abs_path(args.get("path", ""))
-        yield f"[Action] Patching file: {path}\n"
         old_content = args.get("old_content", "")
         new_content = args.get("new_content", "")
         try: new_content = expand_file_refs(new_content, base_dir=self.cwd)
@@ -369,6 +383,8 @@ class GenericAgentHandler(BaseHandler):
     def do_file_write(self, args, response):
         '''用于对整个文件的大量处理，精细修改要用file_patch。
         需要将要写入的内容放在<file_content>标签内，或者放在代码块中'''
+        _blocked = self._check_dispatch_gate('file_write', args)
+        if _blocked: return _blocked
         path = self._get_abs_path(args.get("path", ""))
         mode = args.get("mode", "overwrite")  # overwrite/append/prepend
         action_str = {"prepend": "Prepending to", "append": "Appending to"}.get(mode, "Overwriting")
@@ -521,6 +537,43 @@ class GenericAgentHandler(BaseHandler):
         return prompt
 
     def turn_end_callback(self, response, tool_calls, tool_results, turn, next_prompt, exit_reason):
+        # === Constraint Engine Monitor (接入点) ===
+        try:
+            import os as _os
+            from ga_constraint_engine import load_constraints, evaluate_all
+            _dsl_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'assets', 'constraints_dsl.json')
+            _ce_constraints = load_constraints(_dsl_path)
+            if _ce_constraints:
+                _scripts = [tc['args'].get('script', '') for tc in tool_calls if tc.get('tool_name') == 'code_run' and tc.get('args', {}).get('script')]
+                _usr = ''
+                for _h in reversed(self.history_info):
+                    if _h.startswith('[User]') or _h.startswith('[USER]'):
+                        _usr = _h.split(']', 1)[-1].strip(); break
+                _ce_ctx = {
+                    'history': '\n'.join(self.history_info[-40:]),
+                    'response_text': response.content,
+                    'tool_calls': [{'tool_name': tc.get('tool_name', ''), 'args': tc.get('args', {})} for tc in tool_calls],
+                    'scripts': _scripts,
+                    'user_message': _usr,
+                }
+                _ce_results = evaluate_all(_ce_constraints, _ce_ctx)
+                _violations = [r for r in _ce_results if isinstance(r, dict) and r.get('status') == 'fail']
+                if _violations:
+                    _vids = ', '.join(v.get('constraint_id', '?') for v in _violations[:5])
+                    _vsum = '\n'.join(f"  - [{v.get('constraint_id','?')}] {v.get('reason','')}" for v in _violations[:5])
+                    next_prompt += f"\n[ENGINE] 约束引擎检测到 {len(_violations)} 项违规 ({_vids})：\n{_vsum}"
+        except Exception:
+            pass
+        # === END Constraint Engine Monitor ===
+        # === Dispatch Gate ===
+        try:
+            _gate_tc = [{'tool_name': tc['tool_name'], 'args': tc.get('args', {})} for tc in tool_calls]
+            _gate_level, _gate_prompt = self._dispatch_gate.on_turn_end(_gate_tc, response.content)
+            if _gate_prompt:
+                next_prompt += _gate_prompt
+        except Exception:
+            pass
+        # === END Dispatch Gate ===
         _c = re.sub(r'```.*?```|<thinking>.*?</thinking>', '', response.content, flags=re.DOTALL)
         rsumm = re.search(r"<summary>(.*?)</summary>", _c, re.DOTALL)
         if rsumm: summary = rsumm.group(1).strip()
@@ -546,6 +599,9 @@ class GenericAgentHandler(BaseHandler):
         injprompt = consume_file(self.parent.task_dir, '_intervene')
         if injkeyinfo: self.working['key_info'] = self.working.get('key_info', '') + f"\n[MASTER] {injkeyinfo}"
         if injprompt: next_prompt += f"\n\n[MASTER] {injprompt}\n"
+        _lc = getattr(self.parent, 'llmclient', None)
+        _backend = getattr(_lc, 'backend', None) if _lc else None
+        model_trace = getattr(_backend, 'model_trace', {}) if _backend else {}
         for hook in getattr(self.parent, '_turn_end_hooks', {}).values(): hook(locals())  # current readonly
         return next_prompt
 

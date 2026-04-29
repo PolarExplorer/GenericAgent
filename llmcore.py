@@ -232,6 +232,7 @@ def _parse_claude_sse(resp_lines):
             delta = evt.get("delta", {})
             stop_reason = delta.get("stop_reason", stop_reason)
             out_usage = evt.get("usage", {})
+            if out_usage: _record_usage(out_usage, "messages")
             out_tokens = out_usage.get("output_tokens", 0)
             if out_tokens: print(f"[Output] tokens={out_tokens} stop_reason={stop_reason}")
         elif evt_type == "message_stop": got_message_stop = True
@@ -365,7 +366,7 @@ def last_usage():
 def _record_usage(usage, api_mode):
     if not usage: return
     global _LAST_USAGE
-    _LAST_USAGE = dict(usage)
+    _LAST_USAGE = {**_LAST_USAGE, **usage}
     if api_mode == 'responses':
         cached = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
         inp = usage.get("input_tokens", 0)
@@ -997,8 +998,8 @@ class MixinSession:
         import copy; self._sessions[0] = copy.copy(self._sessions[0])
         self._orig_raw_asks = [s.raw_ask for s in self._sessions]
         self._sessions[0].raw_ask = self._raw_ask
-        self.model = getattr(self._sessions[0], 'model', None)
         self._cur_idx, self._switched_at = 0, 0.0
+        self._model_trace = {'requested': '', 'actual': '', 'fallback_count': 0, 'chain': []}
     def __getattr__(self, name): return getattr(self._sessions[0], name)
     _BROADCAST_ATTRS = frozenset({'system', 'tools', 'temperature', 'max_tokens', 'reasoning_effort', 'history'})
     def __setattr__(self, name, value):
@@ -1009,12 +1010,26 @@ class MixinSession:
         else: object.__setattr__(self, name, value)
     @property
     def primary(self): return self._sessions[0]
+    @property
+    def model(self): return getattr(self._sessions[self._cur_idx], 'model', None)
     def _pick(self):
         if self._cur_idx and time.time() - self._switched_at > self._spring_sec: self._cur_idx = 0
         return self._cur_idx
+    @property
+    def model_trace(self):
+        return dict(self._model_trace)
+
     def _raw_ask(self, *args, **kwargs):
         base, n = self._pick(), len(self._sessions)
         test_error = lambda x: isinstance(x, str) and x.lstrip().startswith(('!!!Error:', '[Error:'))
+        # Record requested model from primary session
+        try:
+            primary_name = getattr(self._sessions[base], 'name', f's{base}')
+            if not self._model_trace['requested']:
+                self._model_trace['requested'] = primary_name
+            self._model_trace['chain'] = [primary_name]
+        except Exception:
+            pass
         for attempt in range(self._retries + 1):
             idx = (base + attempt) % n
             gen = self._orig_raw_asks[idx](*args, **kwargs)
@@ -1029,10 +1044,20 @@ class MixinSession:
             is_err = test_error(last_chunk)
             if not is_err:
                 if attempt > 0: self._cur_idx = idx; self._switched_at = time.time()
+                # Update trace with actual successful session
+                self._model_trace['actual'] = getattr(self._sessions[idx], 'name', f's{idx}')
+                self._model_trace['fallback_count'] = attempt
                 return return_val
             if attempt >= self._retries:
-                yield last_chunk; return return_val
+                yield last_chunk
+                self._model_trace['actual'] = getattr(self._sessions[idx], 'name', f's{idx}')
+                self._model_trace['fallback_count'] = attempt + 1
+                return return_val
             nxt = (base + attempt + 1) % n
+            try:
+                self._model_trace['chain'].append(getattr(self._sessions[nxt], 'name', f's{nxt}'))
+            except Exception:
+                pass
             if nxt == base:  # full round failed, delay before next
                 rnd = (attempt + 1) // n
                 delay = min(30, self._base_delay * (1.5 ** rnd))

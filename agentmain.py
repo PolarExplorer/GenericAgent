@@ -161,7 +161,12 @@ class GeneraticAgent:
                         last_pos = len(full_resp)
                 if self.inc_out and last_pos < len(full_resp): display_queue.put({'next': full_resp[last_pos:], 'source': source})
                 if '</summary>' in full_resp: full_resp = full_resp.replace('</summary>', '</summary>\n\n')
-                if '</file_content>' in full_resp: full_resp = re.sub(r'<file_content>\s*(.*?)\s*</file_content>', r'\n````\n<file_content>\n\1\n</file_content>\n````', full_resp, flags=re.DOTALL)                
+                if '</file_content>' in full_resp: full_resp = re.sub(r'<file_content>\s*(.*?)\s*</file_content>', r'\n````\n<file_content>\n\1\n</file_content>\n````', full_resp, flags=re.DOTALL)
+                # 追加模型信息
+                _mt = getattr(getattr(self.llmclient, 'backend', None), 'model_trace', {})
+                _actual_model = _mt.get('actual', '') if isinstance(_mt, dict) else ''
+                if _actual_model:
+                    full_resp += f'\n\n🤖 {_actual_model}'
                 display_queue.put({'done': full_resp, 'source': source})
                 self.history = handler.history_info
             except Exception as e:
