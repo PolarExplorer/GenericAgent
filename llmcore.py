@@ -1159,6 +1159,12 @@ class MixinSession:
             pass
         for attempt in range(self._retries + 1):
             idx = (base + attempt) % n
+            target = self._sessions[idx]
+            # Fallback时重新从target的history获取消息，避免跨provider格式不匹配
+            # 所有backend的raw_ask都接收Claude格式，内部自行转换
+            if attempt > 0:
+                args = (list(target.history),)
+                kwargs = {}
             gen = self._orig_raw_asks[idx](*args, **kwargs)
             print(f'[MixinSession] Using session ({self._sessions[idx].name})')
             last_chunk, return_val, yielded = None, [], False
@@ -1168,12 +1174,17 @@ class MixinSession:
                     if not yielded and test_error(chunk): continue
                     yield chunk; yielded = True
             except StopIteration as e: return_val = e.value or []
-            is_err = test_error(last_chunk)
-            if not is_err:
+            except Exception as e:
+                # 捕获底层异常(ConnectionError/Timeout/ChunkedEncodingError等)
+                print(f'[MixinSession] Stream exception in s{idx}: {type(e).__name__}: {e}')
+                last_chunk = f'!!!Error: {type(e).__name__}: {str(e)[:200]}'
+            probes = [last_chunk]
+            if isinstance(return_val, list) and return_val:
+                probes.append(return_val[-1])
+            is_err = any(test_error(p) for p in probes)
+            is_stream_broken = any(isinstance(p, str) and '[!!! 流异常中断' in p for p in probes)
+            if not is_err and not is_stream_broken:
                 if attempt > 0: self._cur_idx = idx; self._switched_at = time.time()
-                elif isinstance(last_chunk, str) and '[!!! 流异常中断' in last_chunk and n > 1:
-                    self._cur_idx = (idx + 1) % n; self._switched_at = time.time()
-                    print(f'[MixinSession] Partial failure, next call → s{self._cur_idx} ({self._sessions[self._cur_idx].name})')
                 # Update trace with actual successful session
                 self._model_trace['actual'] = getattr(self._sessions[idx], 'name', f's{idx}')
                 self._model_trace['fallback_count'] = attempt
