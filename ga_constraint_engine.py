@@ -194,6 +194,10 @@ def _check_precondition(params: dict, ctx: dict) -> dict:
     if "pattern" in action_y:
         text = _get_all_text(ctx, action_y.get("scope", "all"))
         pat_match = bool(_match_pattern(text, action_y["pattern"]))
+    # exclude_pattern: if text matches exclude, skip this constraint entirely
+    exclude = action_y.get("exclude_pattern")
+    if exclude and _match_pattern(_get_all_text(ctx, action_y.get("scope", "all")), exclude):
+        return {"status": "skip", "reason": "action excluded by exclude_pattern"}
     if "tool_names" in action_y or "pattern" in action_y:
         y_triggered = tn_match and pat_match
 
@@ -318,8 +322,14 @@ def _check_sequence(params: dict, ctx: dict) -> dict:
     if not triggered:
         return {"status": "skip", "reason": "sequence endpoint not triggered"}
 
-    # 回溯检查前面的步骤是否按序出现
-    history = (ctx.get("history") or [])
+    # exclude_pattern: if trigger step has exclude and current text matches, skip
+    exclude = last_step.get("exclude_pattern")
+    if exclude and _match_pattern(_get_all_text(ctx, last_step.get("scope", "all")), exclude):
+        return {"status": "skip", "reason": "sequence excluded by exclude_pattern"}
+
+    # 回溯检查前面的步骤是否按序出现 (with lookback limit)
+    lookback = params.get("lookback", 50)
+    history = (ctx.get("history") or [])[-lookback:]
     prior_steps = steps[:trigger_step]
     step_idx = 0
     for h in history:
@@ -333,6 +343,10 @@ def _check_sequence(params: dict, ctx: dict) -> dict:
                 matched = True
         if "pattern" in s:
             h_text = json.dumps(h, ensure_ascii=False)
+            # exclude_pattern: skip if history text matches exclude
+            step_exclude = s.get("exclude_pattern")
+            if step_exclude and _match_pattern(h_text, step_exclude):
+                continue
             if _match_pattern(h_text, s["pattern"]):
                 matched = True
         if matched:

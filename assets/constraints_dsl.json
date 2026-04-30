@@ -659,12 +659,13 @@
           "scope": "path_only"
         },
         "precondition": {
-          "lookback": 5,
+          "lookback": 10,
           "tool_names": [
             "code_run",
             "web_scan",
             "web_execute_js",
-            "file_read"
+            "file_read",
+            "update_working_checkpoint"
           ]
         }
       },
@@ -786,7 +787,7 @@
           }
         ],
         "trigger_step": 1,
-        "lookback": 10,
+        "lookback": 20,
         "description": "涉及SOP领域的操作前应先读取memory/（扩大回溯窗口到10轮）"
       },
       "severity": "low",
@@ -853,7 +854,8 @@
           }
         ],
         "trigger_step": 1,
-        "description": "新项目写代码前应先创建规则/结构文件（排除GA自身和temp目录）"
+        "description": "新项目写代码前应先创建规则/结构文件（排除GA自身和temp目录）",
+        "lookback": 30
       },
       "severity": "low",
       "description": "新项目先建CLAUDE.md/README等规则文件再写代码。仅对temp/外新目录触发。"
@@ -894,10 +896,11 @@
             "file_patch"
           ],
           "pattern": "\"path\"\\s*:\\s*\"[^\"]*(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)\"",
-          "scope": "tools"
+          "scope": "tools",
+          "exclude_pattern": "(?:temp|node_modules)[\\\\/]"
         },
         "precondition": {
-          "lookback": 10,
+          "lookback": 20,
           "tool_names": [
             "code_run"
           ],

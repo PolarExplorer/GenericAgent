@@ -687,7 +687,7 @@ def handle_command(open_id, cmd, chat_id=None):
     elif op == "/continue" or cmd.startswith("/continue"):
         _send_cmd_response(handle_continue_frontend(agent, cmd))
     else:
-        _send_cmd_response(f"未知命令: {cmd}")
+        agent.put_task(cmd, source="feishu")
 
 
 def main():

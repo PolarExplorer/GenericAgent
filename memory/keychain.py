@@ -45,4 +45,15 @@ class _Keys:
 
 keys = _Keys()
 
+
+def get_credentials_for_proxy(names=None):
+    if names is None:
+        return dict(keys._d)
+    return {name: keys._d[name] for name in names}
+
+
+def list_services():
+    return keys.ls()
+
+
 def __getattr__(name): return getattr(keys, name)
