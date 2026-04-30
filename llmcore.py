@@ -108,6 +108,8 @@ def _message_text_for_digest(msg, max_len=900):
     text = re.sub(r'<(thinking|think)>[\s\S]*?</\1>', '<thinking>[...]</thinking>', text)
     text = re.sub(r'<(history|key_info)>[\s\S]*?</\1>', lambda m: f'<{m.group(1)}>[...]</{m.group(1)}>', text)
     text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    # Strip [ENGINE] constraint violation injections to prevent cross-task pollution in digest
+    text = re.sub(r'\[ENGINE\]\s*约束引擎检测到[\s\S]*', '', text).strip()
     return text[:max_len//2] + '\n...[Truncated]...\n' + text[-max_len//2:] if len(text) > max_len else text
 
 
@@ -199,21 +201,52 @@ def _parse_claude_json(data):
         elif b.get("type") == "thinking": yield ""
     return content_blocks
 
-def _parse_claude_sse(resp_lines):
+def _sse_response_diag(resp=None, *, elapsed=None, events=None, lines=0, bytes_seen=0, parse_errors=0, extra=None):
+    """Compact transport/parser diagnostics for SSE failures; avoid logging payload/secrets."""
+    parts = []
+    if resp is not None:
+        parts.append(f"status={getattr(resp, 'status_code', '?')}")
+        try:
+            parts.append(f"url={getattr(resp, 'url', '')}")
+        except Exception:
+            pass
+        try:
+            h = getattr(resp, 'headers', {}) or {}
+            safe_headers = {k: h.get(k) for k in ('request-id', 'x-request-id', 'cf-ray', 'anthropic-request-id', 'content-type', 'transfer-encoding') if h.get(k)}
+            if safe_headers: parts.append(f"headers={safe_headers}")
+        except Exception:
+            pass
+    if elapsed is not None: parts.append(f"elapsed={elapsed:.2f}s")
+    if events is not None: parts.append(f"last_events={events}")
+    parts.append(f"lines={lines}")
+    parts.append(f"bytes={bytes_seen}")
+    if parse_errors: parts.append(f"parse_errors={parse_errors}")
+    if extra: parts.append(str(extra))
+    return "; ".join(parts)
+
+def _parse_claude_sse(resp_lines, resp=None, started_at=None):
     """Parse Anthropic SSE stream. Yields text chunks, returns list[content_block]."""
     content_blocks = []; current_block = None; tool_json_buf = ""
     stop_reason = None; got_message_stop = False; warn = None
+    _last_evt_types = []  # track last event types for diagnostics
+    _line_count = 0; _byte_count = 0; _parse_errors = 0
     for line in resp_lines:
         if not line: continue
-        line = line.decode('utf-8') if isinstance(line, bytes) else line
+        _line_count += 1
+        try: _byte_count += len(line)
+        except Exception: pass
+        line = line.decode('utf-8', errors='replace') if isinstance(line, bytes) else line
         if not line.startswith("data:"): continue
         data_str = line[5:].lstrip()
         if data_str == "[DONE]": break
         try: evt = json.loads(data_str)
         except Exception as e:
-            print(f"[SSE] JSON parse error: {e}, line: {data_str[:200]}")
+            _parse_errors += 1
+            print(f"[SSE] JSON parse error: {e}; {_sse_response_diag(resp, elapsed=(time.time()-started_at if started_at else None), events=_last_evt_types, lines=_line_count, bytes_seen=_byte_count, parse_errors=_parse_errors)}; line={data_str[:200]}")
             continue
         evt_type = evt.get("type", "")
+        _last_evt_types.append(evt_type)
+        if len(_last_evt_types) > 8: _last_evt_types.pop(0)
         if evt_type == "message_start":
             usage = evt.get("message", {}).get("usage", {})
             _record_usage(usage, "messages")
@@ -256,7 +289,13 @@ def _parse_claude_sse(resp_lines):
             emsg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
             warn = f"\n\n!!!Error: SSE {emsg}"; break
     if not warn:
-        if not got_message_stop and not stop_reason: warn = "\n\n[!!! 流异常中断，未收到完整响应 !!!]"
+        if not got_message_stop and not stop_reason:
+            diag = _sse_response_diag(resp, elapsed=(time.time()-started_at if started_at else None), events=_last_evt_types, lines=_line_count, bytes_seen=_byte_count, parse_errors=_parse_errors)
+            if content_blocks or current_block:
+                # Content received but no proper termination signal — downgrade to log only
+                print(f"[SSE] Stream ended without message_stop/stop_reason; {diag}; {len(content_blocks)} block(s) received. Response usable.")
+            else:
+                warn = f"\n\n[!!! 流异常中断，未收到完整响应 !!!] {diag}"
         elif stop_reason == "max_tokens": warn = "\n\n[!!! Response truncated: max_tokens !!!]"
     if current_block:
         if current_block["type"] == "tool_use":
@@ -265,7 +304,11 @@ def _parse_claude_sse(resp_lines):
         content_blocks.append(current_block); current_block = None
     if warn:
         print(f"[WARN] {warn.strip()}")
-        content_blocks.append({"type": "text", "text": warn}); yield warn
+        # Keep transport/parser warnings out of model-visible history.  Emitting
+        # them as chunks makes BaseSession.ask append the warning text as an
+        # assistant message, which can poison subsequent turns after one bad SSE.
+        if warn.startswith("\n\n!!!Error:"):
+            yield warn
     return content_blocks
 
 def _try_parse_tool_args(raw):
@@ -450,6 +493,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
     for attempt in range(sess.max_retries + 1):
         streamed = False
         try:
+            _req_started_at = time.time()
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
                 if r.status_code >= 400:
@@ -459,9 +503,19 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                         time.sleep(d); continue
                     try: body = r.text.strip()[:500]
                     except: body = ""
-                    err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "")
+                    # Structured-error diagnostic for 400: detect known patterns
+                    diag = ""
+                    if r.status_code == 400:
+                        bl = body.lower()
+                        if "tool call" in bl or "function_call" in bl or "call_id" in bl:
+                            diag = " [DIAG: orphan tool_call/function_call_output in request — payload structure mismatch, not retryable]"
+                        elif "context_length" in bl or "token" in bl:
+                            diag = " [DIAG: context length exceeded, not retryable without trimming]"
+                        else:
+                            diag = " [DIAG: 400 is a structural request error, not retryable]"
+                    err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "") + diag
                     yield err; return [{"type": "text", "text": err}]
-                gen = parse_fn(r)
+                gen = parse_fn(r, _req_started_at)
                 try:
                     while True: streamed = True; yield next(gen)
                 except StopIteration as e: return e.value or []
@@ -485,7 +539,10 @@ def _openai_stream(sess, messages):
     headers = {"Authorization": f"Bearer {sess.api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"}
     if api_mode == "responses":
         url = auto_make_url(sess.api_base, "responses")
-        payload = {"model": model, "input": _to_responses_input(messages), "stream": sess.stream, 
+        responses_input = _sanitize_responses_tool_chain(_to_responses_input(messages))
+        orphans = _responses_tool_chain_orphans(responses_input)
+        if orphans: raise ValueError(f"Responses input still has orphan function_call_output item(s): {orphans[:3]}")
+        payload = {"model": model, "input": responses_input, "stream": sess.stream, 
                    "prompt_cache_key": _RESP_CACHE_KEY, "instructions": sess.system or "You are an Omnipotent Executor."}
         if sess.reasoning_effort: payload["reasoning"] = {"effort": sess.reasoning_effort}
         if sess.max_tokens: payload["max_output_tokens"] = sess.max_tokens
@@ -516,12 +573,19 @@ def _prepare_oai_tools(tools, api_mode="chat_completions"):
     return tools
 
 def _to_responses_input(messages):
-    result, pending = [], []
+    result, pending, seen_calls = [], [], set()
+    orphan_tool_outputs = 0
     for msg in messages:
         role = str(msg.get("role", "user")).lower()
         if role == "tool":
-            cid = msg.get("tool_call_id") or (pending.pop(0) if pending else f"call_{uuid.uuid4().hex[:8]}")
-            result.append({"type": "function_call_output", "call_id": cid, "output": msg.get("content", "")})
+            explicit_cid = msg.get("tool_call_id")
+            cid = explicit_cid or (pending.pop(0) if pending else "")
+            if cid and cid in seen_calls:
+                result.append({"type": "function_call_output", "call_id": cid, "output": msg.get("content", "")})
+            else:
+                orphan_tool_outputs += 1
+                content = msg.get("content", "")
+                result.append({"role": "user", "content": [{"type": "input_text", "text": f"[orphan tool output converted to text; call_id={cid or 'missing'}]\n{content}"}]})
             continue
         if role not in ["user", "assistant", "system", "developer"]: role = "user"
         if role == "system": role = "developer"  # Responses API uses 'developer' instead of 'system'
@@ -546,13 +610,53 @@ def _to_responses_input(messages):
         for tc in (msg.get("tool_calls") or []):
             f = tc.get("function", {})
             cid = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
-            pending.append(cid)
+            pending.append(cid); seen_calls.add(cid)
             result.append({"type": "function_call", "call_id": cid, "name": f.get("name", ""), "arguments": f.get("arguments", "")})
+    if orphan_tool_outputs: print(f"[WARN] Converted {orphan_tool_outputs} orphan tool output(s) before Responses API call.")
     return result
 
 
+def _sanitize_responses_tool_chain(input_items):
+    """Final guardrail for OpenAI Responses input: function_call_output must have a prior function_call."""
+    seen_calls, cleaned, orphan_outputs = set(), [], 0
+    for item in input_items or []:
+        if not isinstance(item, dict):
+            cleaned.append(item); continue
+        typ = item.get("type")
+        if typ == "function_call":
+            cid = item.get("call_id")
+            if cid: seen_calls.add(cid)
+            cleaned.append(item)
+        elif typ == "function_call_output":
+            cid = item.get("call_id")
+            if cid and cid in seen_calls:
+                cleaned.append(item)
+            else:
+                orphan_outputs += 1
+                output = item.get("output", "")
+                cleaned.append({"role": "user", "content": [{"type": "input_text", "text": f"[orphan function_call_output converted to text; call_id={cid or 'missing'}]\n{output}"}]})
+        else:
+            cleaned.append(item)
+    if orphan_outputs: print(f"[WARN] Sanitized {orphan_outputs} orphan function_call_output item(s) before Responses API send.")
+    return cleaned
+
+
+def _responses_tool_chain_orphans(input_items):
+    seen_calls, orphans = set(), []
+    for idx, item in enumerate(input_items or []):
+        if not isinstance(item, dict): continue
+        if item.get("type") == "function_call":
+            cid = item.get("call_id")
+            if cid: seen_calls.add(cid)
+        elif item.get("type") == "function_call_output":
+            cid = item.get("call_id")
+            if not cid or cid not in seen_calls: orphans.append((idx, cid or ""))
+    return orphans
+
+
 def _msgs_claude2oai(messages):
-    result = []
+    result, seen_tool_uses = [], set()
+    orphan_tool_results = 0
     for msg in messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
@@ -564,8 +668,10 @@ def _msgs_claude2oai(messages):
                 if b.get("type") == "thinking" and b.get("thinking"): reasoning = b["thinking"]
                 elif b.get("type") == "text" and b.get("text"): text_parts.append({"type": "text", "text": b.get("text", "")})
                 elif b.get("type") == "tool_use":
+                    cid = b.get("id") or ''
+                    if cid: seen_tool_uses.add(cid)
                     tool_calls.append({
-                        "id": b.get("id") or '', "type": "function",
+                        "id": cid, "type": "function",
                         "function": {"name": b.get("name", ""), "arguments": json.dumps(b.get("input", {}), ensure_ascii=False)}
                     })
             m = {"role": "assistant"}
@@ -579,13 +685,19 @@ def _msgs_claude2oai(messages):
             for b in blocks:
                 if not isinstance(b, dict): continue
                 if b.get("type") == "tool_result":
-                    if text_parts:
-                        result.append({"role": "user", "content": text_parts})
-                        text_parts = []
                     tr = b.get("content", "")
                     if isinstance(tr, list):
                         tr = "\n".join(x.get("text", "") for x in tr if isinstance(x, dict) and x.get("type") == "text")
-                    result.append({"role": "tool", "tool_call_id": b.get("tool_use_id") or '', "content": tr if isinstance(tr, str) else str(tr)})
+                    tr = tr if isinstance(tr, str) else str(tr)
+                    tid = b.get("tool_use_id") or ''
+                    if tid in seen_tool_uses:
+                        if text_parts:
+                            result.append({"role": "user", "content": text_parts})
+                            text_parts = []
+                        result.append({"role": "tool", "tool_call_id": tid, "content": tr})
+                    else:
+                        orphan_tool_results += 1
+                        text_parts.append({"type": "text", "text": f"[orphan tool_result converted to text; tool_use_id={tid or 'missing'}]\n{tr}"})
                 elif b.get("type") == "image":
                     src = b.get("source") or {}
                     if src.get("type") == "base64" and src.get("data"):
@@ -594,6 +706,7 @@ def _msgs_claude2oai(messages):
                 elif b.get("type") == "text" and b.get("text"): text_parts.append({"type": "text", "text": b.get("text", "")})
             if text_parts: result.append({"role": "user", "content": text_parts})
         else: result.append(msg)
+    if orphan_tool_results: print(f"[WARN] Converted {orphan_tool_results} orphan Claude tool_result(s) before OAI conversion.")
     return result
 
 
@@ -654,7 +767,16 @@ class BaseSession:
                 if block.get('type', '') == 'tool_use':
                     tu = {'name': block.get('name', ''), 'arguments': block.get('input', {})}
                     yield f'<tool_use>{json.dumps(tu, ensure_ascii=False)}</tool_use>'
-            if not content.startswith("!!!Error:"): self.history.append({"role": "assistant", "content": [{"type": "text", "text": content}]})
+            # Do not persist transport/parser warning banners as assistant
+            # content; otherwise one interrupted stream can poison all later
+            # requests in the same session.
+            if content.startswith("!!!Error:"):
+                pass
+            else:
+                for marker in ("\n\n[!!! 流异常中断", "\n\n[!!! Response truncated:"):
+                    if marker in content:
+                        content = content.split(marker, 1)[0]
+                self.history.append({"role": "assistant", "content": [{"type": "text", "text": content}]})
         return _ask_gen() if self.stream else ''.join(list(_ask_gen()))
 
 def _keep_claude_block(b): return not isinstance(b, dict) or b.get("type") != "thinking" or b.get("signature")
@@ -685,7 +807,7 @@ class ClaudeSession(BaseSession):
         self._apply_claude_thinking(payload)
         if self.system: payload["system"] = [{"type": "text", "text": self.system, "cache_control": {"type": "persistent"}}]
         url = auto_make_url(self.api_base, "messages")
-        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines())) if self.stream else (lambda r: _parse_claude_json(r.json()))
+        parse_fn = (lambda r, _t=None: _parse_claude_sse(r.iter_lines(), r, _t)) if self.stream else (lambda r, _t=None: _parse_claude_json(r.json()))
         return (yield from _stream_with_retry(self, url, headers, payload, parse_fn))
     def make_messages(self, raw_list):
         msgs = _drop_unsigned_thinking([{"role": m['role'], "content": list(m['content'])} for m in raw_list])
@@ -728,6 +850,12 @@ class NativeClaudeSession(BaseSession):
         self.tools = None
     def raw_ask(self, messages):
         messages = _ensure_thinking_blocks(_drop_unsigned_thinking(_fix_messages(messages)), self.model)
+        # 非原生Anthropic节点: 第三方中转(如CodeWhisperer)不支持thinking block type
+        if not self.api_key.startswith("sk-ant-"):
+            for _m in messages:
+                _c = _m.get("content")
+                if isinstance(_c, list):
+                    _m["content"] = [_b for _b in _c if not (isinstance(_b, dict) and _b.get("type") == "thinking")]
         if self.max_tokens is None: self.max_tokens = 8192
         model = self.model
         beta_parts = ["claude-code-20250219", "interleaved-thinking-2025-05-14", "redact-thinking-2026-02-12", "prompt-caching-scope-2026-01-05"]
@@ -756,7 +884,29 @@ class NativeClaudeSession(BaseSession):
             messages[idx] = {**messages[idx], "content": list(messages[idx]["content"])}
             messages[idx]["content"][-1] = dict(messages[idx]["content"][-1], cache_control={"type": "ephemeral"})
         url = auto_make_url(self.api_base, "messages") + '?beta=true'
-        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines())) if self.stream else (lambda r: _parse_claude_json(r.json()))
+        # [DEBUG] dump payload to file for debugging
+        if not self.api_key.startswith("sk-ant-"):
+            try:
+                import datetime
+                with open(r"D:\AI\GenericAgent\temp\debug_buzz.json", "w", encoding="utf-8") as _df:
+                    json.dump({
+                        "ts": str(datetime.datetime.now()),
+                        "thinking_in_payload": "thinking" in payload,
+                        "output_config": payload.get("output_config"),
+                        "metadata": payload.get("metadata"),
+                        "beta_header": headers.get("anthropic-beta", ""),
+                        "tools_count": len(payload.get("tools", [])),
+                        "system_type": type(payload.get('system')).__name__,
+                        "system_len": len(str(payload.get('system', ''))),
+                        "msg_count": len(messages),
+                        "msg_content_types": [b.get("type") for m in messages for b in (m.get("content") or []) if isinstance(b, dict)],
+                        "max_tokens": payload.get("max_tokens"),
+                        "model": payload.get("model"),
+                        "stream": payload.get("stream"),
+                    }, _df, ensure_ascii=False, indent=2)
+            except Exception as _dbg_err:
+                pass
+        parse_fn = (lambda r, _t=None: _parse_claude_sse(r.iter_lines(), r, _t)) if self.stream else (lambda r, _t=None: _parse_claude_json(r.json()))
         return (yield from _stream_with_retry(self, url, headers, payload, parse_fn))
 
     def ask(self, msg):
