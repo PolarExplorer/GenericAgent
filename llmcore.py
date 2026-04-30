@@ -617,16 +617,24 @@ def _to_responses_input(messages):
 
 
 def _sanitize_responses_tool_chain(input_items):
-    """Final guardrail for OpenAI Responses input: function_call_output must have a prior function_call."""
-    seen_calls, cleaned, orphan_outputs = set(), [], 0
+    """Final guardrail for OpenAI Responses input: every function_call must have a matching output."""
+    output_call_ids = {
+        item.get("call_id") for item in (input_items or [])
+        if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id")
+    }
+    seen_calls, cleaned, orphan_outputs, dangling_calls = set(), [], 0, 0
     for item in input_items or []:
         if not isinstance(item, dict):
             cleaned.append(item); continue
         typ = item.get("type")
         if typ == "function_call":
             cid = item.get("call_id")
-            if cid: seen_calls.add(cid)
-            cleaned.append(item)
+            if cid and cid in output_call_ids:
+                seen_calls.add(cid)
+                cleaned.append(item)
+            else:
+                dangling_calls += 1
+                cleaned.append({"role": "user", "content": [{"type": "input_text", "text": f"[dangling function_call converted to text; call_id={cid or 'missing'}; name={item.get('name', '')}]\n{item.get('arguments', '')}"}]})
         elif typ == "function_call_output":
             cid = item.get("call_id")
             if cid and cid in seen_calls:
@@ -638,6 +646,7 @@ def _sanitize_responses_tool_chain(input_items):
         else:
             cleaned.append(item)
     if orphan_outputs: print(f"[WARN] Sanitized {orphan_outputs} orphan function_call_output item(s) before Responses API send.")
+    if dangling_calls: print(f"[WARN] Sanitized {dangling_calls} dangling function_call item(s) before Responses API send.")
     return cleaned
 
 
@@ -651,6 +660,11 @@ def _responses_tool_chain_orphans(input_items):
         elif item.get("type") == "function_call_output":
             cid = item.get("call_id")
             if not cid or cid not in seen_calls: orphans.append((idx, cid or ""))
+    missing_outputs = seen_calls - {
+        item.get("call_id") for item in (input_items or [])
+        if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id")
+    }
+    orphans.extend((None, cid) for cid in sorted(missing_outputs))
     return orphans
 
 
