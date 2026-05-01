@@ -148,7 +148,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
     </div>
   </div>
   <div class="governance-bar" id="governance-bar">
-    <div class="gov-card"><div class="gov-label">通过率</div><div class="gov-value green" id="gov-pass-rate">—</div></div>
+    <div class="gov-card"><div class="gov-label">合规率</div><div class="gov-value green" id="gov-pass-rate">—</div></div>
     <div class="gov-card"><div class="gov-label">违规数</div><div class="gov-value green" id="gov-violations">0</div></div>
     <div class="gov-card"><div class="gov-label">风险等级</div><div class="gov-value green" id="gov-risk">🟢 低</div></div>
     <div class="gov-card"><div class="gov-label">连续安全轮</div><div class="gov-value green" id="gov-safe-streak">0</div></div>
@@ -235,6 +235,7 @@ function renderConstraints(registry, latestChecks) {
 
   // 2) Registry items: check if covered by DSL
   for (const item of allReg) {
+    if (item.status === 'inactive') continue; // skip inactive items
     const coveredByDsl = dslIdSet.has('REG-' + item.id);
     const detType = (item.detection && item.detection.type) || 'none';
     if (coveredByDsl) continue; // skip, DSL version takes priority
@@ -256,7 +257,7 @@ function renderConstraints(registry, latestChecks) {
   function renderItem(item, statusOverride) {
     const check = item._check || checkMap[item.id] || {};
     const st = statusOverride || item._status || (check.status) || 'skip';
-    const labels = {pass:'✅ 通过', fail:'🚨 违规', skip:'⏭ 未触发', manual:'📋 人工审查'};
+    const labels = {pass:'✅ 通过', fail:'🚨 违规', skip:'✓ 不适用', manual:'📋 人工审查'};
     const label = labels[st] || st;
     const cssClass = st === 'manual' ? 'manual' : st;
     const srcTag = item._source ? `<span class="csrc">[${item._source}]</span>` : '';
@@ -281,13 +282,13 @@ function renderConstraints(registry, latestChecks) {
 
   el.innerHTML = `
     <div class="constraint-section">
-      <div class="constraint-section-header">🔧 自动检测 <span class="constraint-count">${autoPool.length} 条 · ${autoFail.length} 违规 · ${autoPass.length} 通过 · ${autoSkip.length} 未触发</span>${autoFail.length > 0 ? `<button class="copy-violations-btn" onclick="navigator.clipboard.writeText(window.__violationText||'').then(()=>{this.textContent='✅ 已复制';this.classList.add('copied');setTimeout(()=>{this.textContent='📋 复制违规';this.classList.remove('copied')},1500)})">📋 复制违规</button>` : ''}</div>
+      <div class="constraint-section-header">🔧 自动检测 <span class="constraint-count">${autoPool.length} 条 · ${autoFail.length} 违规 · ${autoPass.length} 通过 · ${autoSkip.length} 不适用</span>${autoFail.length > 0 ? `<button class="copy-violations-btn" onclick="navigator.clipboard.writeText(window.__violationText||'').then(()=>{this.textContent='✅ 已复制';this.classList.add('copied');setTimeout(()=>{this.textContent='📋 复制违规';this.classList.remove('copied')},1500)})">📋 复制违规</button>` : ''}</div>
       ${dslErrHtml}
       ${failHtml}
       ${passHtml}
       ${autoSkip.length > 0 ? `
       <div class="constraint-section-header collapsed" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('hidden')" style="font-size:0.85em;padding:4px 12px;cursor:pointer">
-        ⏭ 未触发 <span class="constraint-count">${autoSkip.length} 条</span> <span class="toggle-arrow">▶</span>
+        ✓ 不适用 <span class="constraint-count">${autoSkip.length} 条</span> <span class="toggle-arrow">▶</span>
       </div>
       <div class="hidden">${skipHtml}</div>` : ''}
     </div>
@@ -567,7 +568,7 @@ function updateTopbar(ev, taskEvents, violations) {
 }
 
 function updateGovernanceBar(taskEvents, violations, latestChecks, registry) {
-  // 通过率：只基于 automated 约束（排除 manual 类型）
+  // 合规率：只基于 automated 约束（排除 manual 类型）
   const manualIds = new Set();
   if (registry) {
     for (const item of [...(registry.constraints||[]), ...(registry.rules||[])]) {
@@ -576,9 +577,9 @@ function updateGovernanceBar(taskEvents, violations, latestChecks, registry) {
   }
   const allChecks = taskEvents.flatMap(ev => (ev.constraint_checks || []));
   const autoChecks = allChecks.filter(c => !manualIds.has(c.id));
-  const evaluated = autoChecks.filter(c => c.status === 'pass' || c.status === 'fail');
-  const passed = evaluated.filter(c => c.status === 'pass').length;
-  const rate = evaluated.length ? Math.round(passed / evaluated.length * 100) : 100;
+  // 合规率 = (总数 - 违规) / 总数 — skip 算合规（已评估、条件不适用）
+  const failed = autoChecks.filter(c => c.status === 'fail').length;
+  const rate = autoChecks.length ? Math.round((autoChecks.length - failed) / autoChecks.length * 100) : 100;
   const rateEl = document.getElementById('gov-pass-rate');
   rateEl.textContent = rate + '%';
   rateEl.className = 'gov-value ' + (rate >= 90 ? 'green' : rate >= 70 ? 'yellow' : 'red');

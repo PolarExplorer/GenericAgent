@@ -197,6 +197,36 @@ def _ensure_dashboard_assets():
         pass
 
 
+def _regenerate_snapshot():
+    """Regenerate constraints_snapshot.json from current registry + DSL files.
+
+    Called by install() on startup and by /api/reload to keep dashboard in sync.
+    """
+    _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
+    registry = _load_registry()
+    try:
+        import ga_constraint_engine as _dsl_eng
+        _dsl_cons = _dsl_eng.load_constraints(str(_DSL_CONSTRAINTS_PATH))
+        dsl_rules = []
+        for c in (_dsl_cons or []):
+            dsl_rules.append({
+                "id": c.get("id", ""),
+                "name": c.get("name", ""),
+                "description": c.get("source", ""),
+                "check_type": c.get("check_type", ""),
+                "detection": {"type": "auto"},
+                "type": "dsl"
+            })
+        registry["dsl_constraints"] = dsl_rules
+    except Exception as e:
+        registry["dsl_constraints"] = []
+        registry["dsl_load_error"] = str(e)[:200]
+
+    with open(_DASHBOARD_DIR / "constraints_snapshot.json", "w", encoding="utf-8") as f:
+        json.dump(registry, f, ensure_ascii=False, indent=1)
+    return True
+
+
 def _load_registry():
     """Load constraints registry, with mtime-based cache."""
     global _registry_cache, _registry_mtime
@@ -1194,6 +1224,16 @@ def _on_turn_end(ctx):
         # --- DSL Constraint Engine (parallel shadow layer) ---
         try:
             import ga_constraint_engine as _dsl_eng
+            # Hot-reload engine module when its source file changes
+            import importlib as _il
+            try:
+                _eng_src = Path(_dsl_eng.__file__).resolve()
+                _eng_mt = _eng_src.stat().st_mtime
+                if getattr(_dsl_eng, '_loaded_mtime', None) != _eng_mt:
+                    _dsl_eng = _il.reload(_dsl_eng)
+                    _dsl_eng._loaded_mtime = _eng_mt
+            except Exception:
+                pass
             _dsl_constraints = _dsl_eng.load_constraints(str(_DSL_CONSTRAINTS_PATH))
             if _dsl_constraints:
                 # Build ctx for DSL engine
@@ -1346,30 +1386,11 @@ def install(agent):
     except Exception:
         _SUBAGENT_AVAILABLE = True  # conservative: assume available
     # Write initial registry snapshot for dashboard (merged registry + DSL)
-    _DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
-    registry = _load_registry()
-    try:
-        import ga_constraint_engine as _dsl_eng
-        _dsl_cons = _dsl_eng.load_constraints(str(_DSL_CONSTRAINTS_PATH))
-        # Convert DSL constraints to registry-like format for frontend
-        dsl_rules = []
-        for c in (_dsl_cons or []):
-            dsl_rules.append({
-                "id": c.get("id", ""),
-                "name": c.get("name", ""),
-                "description": c.get("source", ""),
-                "check_type": c.get("check_type", ""),
-                "detection": {"type": "auto"},
-                "type": "dsl"
-            })
-        registry["dsl_constraints"] = dsl_rules
-    except Exception as e:
-        registry["dsl_constraints"] = []
-        registry["dsl_load_error"] = str(e)[:200]
-    
-    with open(_DASHBOARD_DIR / "constraints_snapshot.json", "w", encoding="utf-8") as f:
-        json.dump(registry, f, ensure_ascii=False, indent=1)
-    return True# Dashboard control API extension: local POST /api/stop calls GA native abort().
+    _regenerate_snapshot()
+    return True
+
+
+# Dashboard control API extension: local POST /api/stop calls GA native abort().
 def _append_control_event(action, status, message=""):
     event = {
         "task_id": _current_task_id(),
@@ -1449,10 +1470,19 @@ class _ControlHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/reload":
             reloaded, err = _hot_reload(force=True)
+            # Refresh snapshot & dashboard HTML so frontend picks up changes
+            try:
+                _regenerate_snapshot()
+                _ensure_dashboard_assets()
+            except Exception as _snap_err:
+                if err:
+                    err += f"; snapshot_error={_snap_err!r}"
+                else:
+                    err = f"snapshot_error={_snap_err!r}"
             if err:
                 self._send_json(500, {"ok": False, "reloaded": False, "error": err})
             else:
-                self._send_json(200, {"ok": True, "reloaded": reloaded})
+                self._send_json(200, {"ok": True, "reloaded": reloaded, "snapshot_refreshed": True})
             return
         if self.path != "/api/stop":
             self._send_json(404, {"ok": False, "error": "not_found"})

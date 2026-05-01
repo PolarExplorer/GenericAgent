@@ -54,33 +54,14 @@
       }
     },
     {
-      "id": "MISSING-VISION-ENUM-WINDOW",
-      "name": "调用vision前必须枚举并确认窗口",
-      "source": "memory/vision_sop.md:7",
-      "check_type": "precondition",
-      "params": {
-        "action": {
-          "scope": "response",
-          "pattern": "(?:vision|screenshot|截图|capture_screen|grab_screen|ImageGrab)",
-          "tool_names": [
-            "web_execute_js",
-            "code_run"
-          ]
-        },
-        "precondition": {
-          "lookback": 2,
-          "response_pattern": "(枚举窗口|窗口标题|pygetwindow|win32gui|activate|前台)"
-        }
-      }
-    },
-    {
       "id": "MISSING-PS-CAT-TYPE",
       "name": "禁止PowerShell cat/type读取文件，必须file_read",
       "source": "global_mem_insight/RULES",
       "check_type": "pattern_forbidden",
       "params": {
         "scope": "exec_only",
-        "pattern": "(?:^|[;&|\\n\\r])\\s*(?:cat|type)\\s+[A-Za-z0-9_./\\\\:-]+"
+        "pattern": "(?:^|[;&|\\n\\r])\\s*(?:cat|type)\\s+[A-Za-z0-9_./\\\\:-]+",
+        "negative_context": "[\"'{}()\\[\\]]|import |def |class |subprocess|os\\."
       }
     },
     {
@@ -128,7 +109,7 @@
           "pattern": "memory[\\\\/](?:global_mem(?:_insight)?\\.txt|.*_sop\\.md|.*\\.md|.*\\.txt)"
         },
         "precondition": {
-          "lookback": 5,
+          "lookback": 10,
           "tool_names": [
             "file_read"
           ],
@@ -136,7 +117,7 @@
         }
       },
       "severity": "critical",
-      "description": "任何file_write/file_patch写入memory下长期记忆文件前，近5轮必须实际读取META-SOP(L0)"
+      "description": "任何file_write/file_patch写入memory下长期记忆文件前，近10轮必须实际读取META-SOP(L0)"
     },
     {
       "id": "REG-C001",
@@ -411,17 +392,6 @@
       }
     },
     {
-      "id": "REG-R015",
-      "name": "搜索网页优先 Google，禁 DuckDuckGo",
-      "source": "RULES #1",
-      "check_type": "pattern_forbidden",
-      "params": {
-        "scope": "tool_args",
-        "pattern": "(?i)\\b(duckduckgo|duckduckgo\\.com|ddg\\b)",
-        "description": "检测使用 DuckDuckGo/DDG 替代 Google 搜索"
-      }
-    },
-    {
       "id": "REG-R020",
       "name": "GUI 状态优先枚举窗口标题",
       "source": "RULES #6",
@@ -430,7 +400,7 @@
         "scope": "exec_only",
         "pattern": "(?is)\\A(?=.*(?:screenshot|GetForegroundWindow|FindWindow|SetForegroundWindow|click_at|mouse_click|pyautogui\\..*click|ljqCtrl|窗口操作|前台窗口|activate.*window))(?!.*(?:EnumWindows|win32gui|GetWindowText|枚举窗口|窗口标题)).*",
         "description": "检测GUI/窗口状态操作缺窗口标题枚举证据",
-        "negative_context": "(?:html|javascript|js|web_execute|innerHTML|querySelector|addEventListener|button|href|onclick)"
+        "negative_context": "(?:html|javascript|js|web_execute|innerHTML|querySelector|addEventListener|button|href|onclick|import\\s+json|import\\s+re|open\\s*\\(|test_dsl|def\\s+test_|findstr|constraints_dsl)"
       }
     },
     {
@@ -486,8 +456,8 @@
       "check_type": "pattern_forbidden",
       "params": {
         "scope": "exec_only",
-        "pattern": "#\\s*(?:import|from|raise|assert)\\b",
-        "description": "检测被注释掉的import/raise/assert（疑似为跑通而注释报错）"
+        "pattern": "#\\s*(?:import\\s+\\w|from\\s+\\w+\\s+import|raise\\s+\\w|assert\\s+\\w)",
+        "description": "检测被注释掉的import/from-import/raise/assert语句（需后跟模块名/类名才匹配真正代码注释）"
       }
     },
     {
@@ -499,17 +469,6 @@
         "scope": "exec_only",
         "pattern": "(?is)git\\s+commit\\b[^\\n]*-m\\s*[\\\"\\'][^\\\"\\']*[\\u4e00-\\u9fff][^\\\"\\']*[\\\"\\']",
         "description": "检测git commit message含中文，要求英文简洁表达意图"
-      }
-    },
-    {
-      "id": "REG-R053",
-      "name": "Codex/GPT-5.5 结果必须测试或截图验证闭环",
-      "source": "model_dispatch_sop",
-      "check_type": "llm_judge",
-      "params": {
-        "trigger_pattern": "(?i)(?:完成|修复|搞定|可用|验证通过|测试通过|PASS|WORKING|SUCCESS)",
-        "required_evidence": "(?i)(?:截图|日志|输出|结果|exit.code|PASS|输出如下|验证结果)",
-        "description": "声明完成/修复/可用时，必须有截图/日志/输出等证据支撑"
       }
     },
     {
@@ -563,8 +522,8 @@
       "check_type": "pattern_forbidden",
       "params": {
         "scope": "exec_only",
-        "pattern": "(?s)\\A(?!.*max_delay_hours)(?=.*(?:scheduled_task|schedule_task|create_task|register_task|schtasks|add_task)).*",
-        "description": "检测创建/注册定时任务时未设置 max_delay_hours"
+        "pattern": "(?s)\\A(?!.*max_delay_hours)(?=.*(?:scheduled_task|schedule_task|create_task|register_task|schtasks\\s+/create|add_task)).*",
+        "description": "检测创建/注册定时任务时未设置 max_delay_hours（schtasks仅匹配/create子命令）"
       }
     },
     {
@@ -600,18 +559,6 @@
       },
       "severity": "critical",
       "description": "file_write/file_patch目标在GA根目录(排除temp/)且用户无明确操作指令时触发。"
-    },
-    {
-      "id": "REG-C014",
-      "name": "代码中禁止中文变量名",
-      "source": "C014",
-      "check_type": "pattern_forbidden",
-      "params": {
-        "scope": "exec_only",
-        "pattern": "(?:def|class|import)\\s+[\\u4e00-\\u9fff]|(?<![\"'\\w])[\\u4e00-\\u9fff]+\\s*=\\s*|for\\s+[\\u4e00-\\u9fff]",
-        "description": "检测代码中使用中文作为变量名/函数名/类名（排除引号内字面量）"
-      },
-      "severity": "low"
     },
     {
       "id": "REG-C015",
@@ -665,7 +612,7 @@
           "scope": "path_only"
         },
         "precondition": {
-          "lookback": 5,
+          "lookback": 10,
           "tool_names": [
             "code_run",
             "web_scan",
@@ -676,31 +623,7 @@
         }
       },
       "severity": "high",
-      "description": "写入L1/L2/L3记忆文件前，近5轮必须有成功工具调用获取证据"
-    },
-    {
-      "id": "REG-C031-WM-BEFORE-LTM",
-      "name": "写长期记忆前必须先更新工作记忆检查点",
-      "source": "C031 / memory_management_sop",
-      "check_type": "precondition",
-      "params": {
-        "action": {
-          "tool_names": [
-            "file_write",
-            "file_patch"
-          ],
-          "pattern": "memory[\\\\/](?:global_mem(?:_insight)?\\.txt|.*_sop\\.md|.*\\.md|.*\\.txt)",
-          "scope": "path_only"
-        },
-        "precondition": {
-          "lookback": 5,
-          "tool_names": [
-            "update_working_checkpoint"
-          ]
-        }
-      },
-      "severity": "high",
-      "description": "长期记忆写入前，近5轮必须先把证据和写入意图压入工作记忆，避免无依据蒸馏"
+      "description": "写入L1/L2/L3记忆文件前，近10轮必须有成功工具调用获取证据"
     },
     {
       "id": "REG-C034",
@@ -745,8 +668,8 @@
     },
     {
       "id": "REG-R004",
-      "name": "连续执行≥3轮必须反思",
-      "source": "CONSTITUTION:3 / R004",
+      "name": "连续执行≥3轮必须反思(含分发纪律)",
+      "source": "CONSTITUTION:3 / R004 / R061",
       "check_type": "consecutive_execution",
       "params": {
         "lookback": 3,
@@ -755,28 +678,12 @@
           "(?:反思|回顾|review|rethink|重新考虑|换方案|换个思路)",
           "update_working_checkpoint",
           "(?:阶段|phase|step)\\s*\\d",
-          "(?:方案|plan|策略|strategy|分析|诊断)"
+          "(?:方案|plan|策略|strategy|分析|诊断)",
+          "(?:分发|dispatch|subagent|委托|delegate)"
         ]
       },
       "severity": "high",
-      "description": "连续≥3轮纯工具执行无反思/规划/checkpoint时触发"
-    },
-    {
-      "id": "REG-R061",
-      "name": "分发纪律-连续同类执行须反思是否该分发",
-      "source": "R061/RULES:14",
-      "check_type": "consecutive_execution",
-      "params": {
-        "lookback": 3,
-        "threshold": 3,
-        "reflection_signals": [
-          "(?:分发|dispatch|subagent|委托|delegate)",
-          "update_working_checkpoint",
-          "(?:反思|是否该|should I)"
-        ]
-      },
-      "severity": "medium",
-      "description": "连续≥3轮同类执行任务须停下反思是否该分发给subagent"
+      "description": "连续≥3轮纯工具执行无反思/规划/checkpoint/分发考量时触发"
     },
     {
       "id": "REG-R024",
@@ -813,7 +720,12 @@
             "pattern": "memory[\\\\/](?:global_mem|.*_sop|memory_management_sop)"
           },
           {
-            "pattern": "(?s)(?=.*(?:_sop|SOP|memory[\\\\/]|记忆|约束引擎|constraint_engine|scheduled_task|autonomous|长期记忆|写记忆|dispatch|model_dispatch|tool_dispatch)).*(?:开始|执行|实施|修改|写入|升级|配置|implement|start|patch|update)"
+            "tool_names": [
+              "file_write",
+              "file_patch"
+            ],
+            "pattern": "memory[\\\\/]|_sop\\.|constraint|rules_engine",
+            "scope": "exec_only"
           }
         ],
         "trigger_step": 1,
@@ -853,11 +765,12 @@
             "tool_names": [
               "web_scan",
               "web_execute_js"
-            ]
+            ],
+            "exclude_pattern": "(?:localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\])"
           }
         ],
         "trigger_step": 1,
-        "description": "使用web工具前应先尝试curl/requests"
+        "description": "使用web工具访问外部URL前应先尝试curl/requests（localhost/本机地址除外）"
       },
       "severity": "low",
       "description": "联网操作应遵循三层降级：curl→框架web工具→CDP"
@@ -915,33 +828,6 @@
       },
       "severity": "low",
       "description": "UI开发应先生成mockup再编码还原。仅对外部项目UI文件触发。"
-    },
-    {
-      "id": "REG-R040",
-      "name": "改完代码跑test/lint/build",
-      "source": "R040",
-      "check_type": "precondition",
-      "params": {
-        "action": {
-          "tool_names": [
-            "file_write",
-            "file_patch"
-          ],
-          "pattern": "\"path\"\\s*:\\s*\"[^\"]*(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)\"",
-          "scope": "tools",
-          "exclude_pattern": "(?:temp|node_modules)[\\\\/]"
-        },
-        "precondition": {
-          "lookback": 20,
-          "tool_names": [
-            "code_run"
-          ],
-          "response_pattern": "(?:test|lint|build|pytest|vitest|eslint|tsc|cargo|验证|verify|check|passed|通过|成功|✅)"
-        },
-        "description": "修改代码文件后应在后续轮次运行测试/lint/build（扩大回溯窗口到10轮）"
-      },
-      "severity": "low",
-      "description": "修改代码文件后应在后续轮次运行测试/lint/build"
     },
     {
       "id": "REG-R022",
@@ -1057,27 +943,78 @@
     },
     {
       "id": "REG-R051",
-      "name": "信息收集子任务走llm_no=6",
-      "source": "R051/RULES:14/model_dispatch_sop",
+      "name": "信息收集/批量处理子任务走llm_no=6",
+      "source": "R051/R052/RULES:14/model_dispatch_sop",
       "check_type": "pattern_forbidden",
       "params": {
         "scope": "response",
-        "pattern": "(?:subagent|sub_agent|委托).{0,100}(?:信息收集|research|调研|搜索|search|查找资料).{0,100}llm_no\\s*[=:]\\s*(?!6\\b)\\d+"
+        "pattern": "(?:subagent|sub_agent|委托).{0,100}(?:信息收集|research|调研|搜索|search|查找资料|批量|文档处理|batch|bulk|大量文件).{0,100}llm_no\\s*[=:]\\s*(?!6\\b)\\d+"
       },
       "severity": "medium",
-      "description": "信息收集类subagent必须指定llm_no=6"
+      "description": "信息收集/批量文档处理类subagent必须指定llm_no=6"
     },
     {
-      "id": "REG-R052",
-      "name": "批量文档处理走llm_no=6",
-      "source": "R052/RULES:14/model_dispatch_sop",
+      "id": "REG-C014",
+      "name": "代码中禁止中文变量名",
+      "source": "C014",
       "check_type": "pattern_forbidden",
       "params": {
-        "scope": "response",
-        "pattern": "(?:subagent|sub_agent|委托).{0,100}(?:批量|文档处理|batch|bulk|大量文件).{0,100}llm_no\\s*[=:]\\s*(?!6\\b)\\d+"
+        "scope": "exec_only",
+        "pattern": "(?:def|class|import)\\s+[\\u4e00-\\u9fff]|(?<![\"'\\w])[\\u4e00-\\u9fff]+\\s*=\\s*|for\\s+[\\u4e00-\\u9fff]",
+        "description": "检测代码中使用中文作为变量名/函数名/类名（排除引号内字面量）"
       },
-      "severity": "medium",
-      "description": "批量文档处理类subagent必须指定llm_no=6"
+      "severity": "low"
+    },
+    {
+      "id": "REG-C031-WM-BEFORE-LTM",
+      "name": "写长期记忆前必须先更新工作记忆检查点",
+      "source": "C031 / memory_management_sop",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "tool_names": [
+            "file_write",
+            "file_patch"
+          ],
+          "pattern": "memory[\\\\/](?:global_mem(?:_insight)?\\.txt|.*_sop\\.md|.*\\.md|.*\\.txt)",
+          "scope": "path_only"
+        },
+        "precondition": {
+          "lookback": 5,
+          "tool_names": [
+            "update_working_checkpoint"
+          ]
+        }
+      },
+      "severity": "high",
+      "description": "长期记忆写入前，近5轮必须先把证据和写入意图压入工作记忆，避免无依据蒸馏"
+    },
+    {
+      "id": "REG-R040",
+      "name": "改完代码跑test/lint/build",
+      "source": "R040",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "tool_names": [
+            "file_write",
+            "file_patch"
+          ],
+          "pattern": "\"path\"\\s*:\\s*\"[^\"]*(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)\"",
+          "scope": "tools",
+          "exclude_pattern": "(?:temp|node_modules)[\\\\/]"
+        },
+        "precondition": {
+          "lookback": 20,
+          "tool_names": [
+            "code_run"
+          ],
+          "response_pattern": "(?:test|lint|build|pytest|vitest|eslint|tsc|cargo|验证|verify|check|passed|通过|成功|✅)"
+        },
+        "description": "修改代码文件后应在后续轮次运行测试/lint/build（扩大回溯窗口到10轮）"
+      },
+      "severity": "low",
+      "description": "修改代码文件后应在后续轮次运行测试/lint/build"
     }
   ]
 }

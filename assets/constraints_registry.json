@@ -52,7 +52,9 @@
       "detection": {
         "type": "memory_write_check"
       },
-      "active": true
+      "active": true,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "C006",
@@ -78,7 +80,9 @@
         "scope": "exec_only",
         "description": "读取文件使用 file_read，禁止用 PowerShell cat/type/Get-Content"
       },
-      "active": true
+      "active": true,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "C008",
@@ -90,7 +94,9 @@
         "ref": "C001",
         "description": "与C001重复（禁pyautogui）"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "C012",
@@ -102,7 +108,9 @@
         "duplicate_of": "R001",
         "description": "文件名搜索必须 es 与 R001 已自动检测项重复"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "C013",
@@ -113,15 +121,6 @@
         "type": "manual",
         "description": "文件上传/跨域iframe/PDF blob/HttpOnly Cookie等复杂浏览器场景按 tmwebdriver_sop"
       },
-      "active": true
-    },
-    {
-      "id": "C014",
-      "name": "默认中文，代码/命令/变量名用英文",
-      "category": "用户偏好",
-      "source": "用户全局CLAUDE.md",
-      "detection": "engine",
-      "added": "2026-04-27",
       "active": true
     },
     {
@@ -242,7 +241,9 @@
         "description": "gpt-image-2 /gpt endpoint requirement already covered by C002"
       },
       "added": "2026-04-27",
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "C025",
@@ -401,7 +402,9 @@
         "scope": "exec_only",
         "description": "调用ljqCtrl前必须先activate目标窗口"
       },
-      "enabled": true
+      "enabled": true,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "C038",
@@ -455,7 +458,9 @@
         "description": "与R006重复（禁全屏截图）"
       },
       "enabled": true,
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "C042",
@@ -661,7 +666,9 @@
         "before_tool": "file_patch",
         "required_prior": "file_read"
       },
-      "active": true
+      "active": true,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R003",
@@ -751,7 +758,9 @@
         "duplicate_of": "R007",
         "description": "No evidence/no claim 语义与 R007 重复"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R011",
@@ -831,7 +840,9 @@
         "duplicate_of": "R002",
         "description": "编码改文件前必须file_read由R002 sequence_check覆盖核心违规路径"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R018",
@@ -854,7 +865,9 @@
         "duplicate_of": "R008",
         "description": "禁止无条件杀 python 与 R008 已自动检测项重复"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R020",
@@ -921,7 +934,9 @@
         "duplicate_of": "R003",
         "description": "用户征询措辞禁止执行工具已由R003 context_check覆盖"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R026",
@@ -1016,7 +1031,9 @@
         "duplicate_of": "C004",
         "description": "敏感文件读取/展示由C004 sensitive_access与C020 secret literal检测覆盖主要违规路径"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R035",
@@ -1028,7 +1045,9 @@
         "duplicate_of": "C034",
         "description": "L2/L3 变化同步 L1 语义与 C034 重复"
       },
-      "active": false
+      "active": false,
+      "status": "inactive",
+      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R036",
@@ -1080,9 +1099,12 @@
       "name": "改完主动跑 test/lint/build 验证",
       "category": "验证规则",
       "source": "用户全局CLAUDE.md",
-      "detection": "engine",
+      "detection": {
+        "type": "retired",
+        "description": "已删除：verify_sop+Constitution#2已覆盖，precondition引擎无法表达后置语义，19次中18次误报"
+      },
       "added": "2026-04-27",
-      "active": true
+      "active": false
     },
     {
       "id": "R041",
