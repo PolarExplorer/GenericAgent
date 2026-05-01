@@ -99,7 +99,13 @@ def _message_text_for_digest(msg, max_len=900):
             if t == 'text': parts.append(b.get('text', ''))
             elif t == 'tool_use':
                 name = b.get('name') or b.get('input', {}).get('name') or 'tool'
-                parts.append(f"[tool_use:{name}] {json.dumps(b.get('input', {}), ensure_ascii=False)[:max_len]}")
+                inp = b.get('input', {})
+                inp_s = json.dumps(inp, ensure_ascii=False)
+                if len(inp_s) > max_len:
+                    # Extract top-level keys + truncated preview instead of raw JSON cut
+                    keys = list(inp.keys())[:10] if isinstance(inp, dict) else []
+                    inp_s = f"keys={keys} " + inp_s[:max_len // 2] + '…'
+                parts.append(f"[tool_use:{name}] {inp_s}")
             elif t == 'tool_result':
                 c = b.get('content', '')
                 if isinstance(c, list): c = '\n'.join(x.get('text', '') for x in c if isinstance(x, dict))
@@ -118,18 +124,87 @@ def _compact_history_prefix(history, target, keep_recent=8):
     if len(history) <= keep_recent + 2: return False
     split = max(1, len(history) - keep_recent)
     while split < len(history) and history[split].get('role') != 'user': split += 1
-    if split >= len(history) - 2: return False
+    if split >= len(history) - 1: return False
     old, recent = history[:split], history[split:]
-    budget = max(1200, min(12000, int(target * 0.20)))
-    per_msg = max(160, min(900, budget // max(1, len(old))))
+    budget = max(1200, min(24000, int(target * 0.20)))
+    # Graduated allocation: later messages (closer to recent context) get 2x weight
+    n = max(1, len(old))
+    half = n // 2
+    # first half gets weight 1, second half gets weight 2 → total_weight = half + 2*(n-half)
+    total_weight = half + 2 * (n - half)
+    base_per = max(120, budget // max(1, total_weight))
+    # per_msg_list[i]: chars budget for message i
+    per_msg_list = [base_per if i < half else base_per * 2 for i in range(n)]
     lines = ["[GA_CONTEXT_DIGEST] Older conversation was compacted to reduce repeated input tokens. Preserve these facts, decisions, constraints, and evidence references; recent raw messages follow."]
-    for idx, msg in enumerate(old, 1):
-        text = _message_text_for_digest(msg, per_msg)
+    # Pre-merge tool_use + tool_result pairs for coherent digest
+    merged_old = []
+    merged_budgets = []  # parallel budget list for merged_old
+    i = 0
+    while i < len(old):
+        msg = old[i]
+        # Detect assistant with tool_use followed by user with tool_result
+        if (msg.get('role') == 'assistant' and i + 1 < len(old)
+                and old[i + 1].get('role') == 'user'):
+            blocks = msg.get('content', [])
+            next_blocks = old[i + 1].get('content', [])
+            if isinstance(blocks, list) and isinstance(next_blocks, list):
+                tool_uses = [b for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use']
+                tool_results = [b for b in next_blocks if isinstance(b, dict) and b.get('type') == 'tool_result']
+                if tool_uses and tool_results:
+                    # Merged pair gets combined budget of both messages
+                    pair_budget = per_msg_list[i] + (per_msg_list[i + 1] if i + 1 < n else 0)
+                    # Build merged summary: [tool:name → result_snippet]
+                    result_map = {b.get('tool_use_id'): b for b in tool_results}
+                    parts = []
+                    # Include any non-tool text from assistant
+                    for b in blocks:
+                        if isinstance(b, dict) and b.get('type') == 'text' and b.get('text', '').strip():
+                            parts.append(b['text'].strip())
+                    for tu in tool_uses:
+                        name = tu.get('name', 'tool')
+                        tr = result_map.get(tu.get('id'))
+                        res_snip = ''
+                        if tr:
+                            rc = tr.get('content', '')
+                            if isinstance(rc, list):
+                                rc = ' '.join(b.get('text', '') for b in rc if isinstance(b, dict))
+                            res_snip = str(rc)[:pair_budget // 2]
+                        inp = tu.get('input', {})
+                        inp_keys = list(inp.keys())[:6] if isinstance(inp, dict) else []
+                        parts.append(f"[tool:{name}({inp_keys})→{res_snip}]")
+                    # Include any non-tool text from user (tool_result msg)
+                    for b in next_blocks:
+                        if isinstance(b, dict) and b.get('type') == 'text' and b.get('text', '').strip():
+                            parts.append(b['text'].strip())
+                    merged_old.append({'role': 'assistant', '_merged_text': '\n'.join(parts)})
+                    merged_budgets.append(pair_budget)
+                    i += 2
+                    continue
+        merged_old.append(msg)
+        merged_budgets.append(per_msg_list[i] if i < n else base_per)
+        i += 1
+    for idx, msg in enumerate(merged_old):
+        msg_budget = merged_budgets[idx] if idx < len(merged_budgets) else base_per
+        if '_merged_text' in msg:
+            text = msg['_merged_text'][:msg_budget]
+        else:
+            text = _message_text_for_digest(msg, msg_budget)
         if text: lines.append(f"{idx}. {msg.get('role','?')}: {text}")
     digest = '\n'.join(lines)
     compacted = {"role": "user", "content": [{"type": "text", "text": digest}]}
     before = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
     history[:] = [compacted] + recent
+    # Merge consecutive user messages after compaction (digest is user, recent[0] may also be user)
+    if len(history) >= 2 and history[0].get('role') == 'user' and history[1].get('role') == 'user':
+        second = history[1]
+        sc = second.get('content', [])
+        extra_text = ''
+        if isinstance(sc, str): extra_text = sc
+        elif isinstance(sc, list):
+            extra_text = '\n'.join(b.get('text', '') for b in sc if isinstance(b, dict) and b.get('type') == 'text')
+        if extra_text.strip():
+            history[0]['content'][0]['text'] += '\n---\n' + extra_text.strip()
+        history.pop(1)
     after = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
     print(f'[Debug] Compacted history prefix: {before} -> {after} chars, {len(old)} msgs -> digest.')
     return after < before
@@ -163,6 +238,35 @@ def _cleanup_history_tool_boundaries(history):
                                     if cleaned != uc: history[i] = {**history[i], 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
                             continue
             i += 1
+        # Reverse-orphan cleanup: strip tool_result blocks in user msgs that have no
+        # matching tool_use in the preceding assistant message (e.g. after trim popped
+        # the assistant msg but left the user msg with dangling tool_results).
+        i = 0
+        while i < len(history):
+            m = history[i]
+            if m.get('role') == 'user':
+                uc = m.get('content', [])
+                if isinstance(uc, list):
+                    result_ids = {b.get('tool_use_id') for b in uc if isinstance(b, dict) and b.get('type') == 'tool_result'}
+                    if result_ids:
+                        # Collect tool_use ids from the preceding assistant message
+                        prev_use_ids = set()
+                        if i > 0 and history[i - 1].get('role') == 'assistant':
+                            pc = history[i - 1].get('content', [])
+                            if isinstance(pc, list):
+                                prev_use_ids = {b.get('id') for b in pc if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('id')}
+                        orphan_ids = result_ids - prev_use_ids
+                        if orphan_ids:
+                            cleaned = [b for b in uc if not (isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') in orphan_ids)]
+                            history[i] = {**m, 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
+            i += 1
+        # Leading-role fix: after system msgs, first non-system must be user.
+        # If it's assistant (e.g. trim removed the leading user), insert a placeholder user msg.
+        first_non_sys = 0
+        while first_non_sys < len(history) and history[first_non_sys].get('role') == 'system':
+            first_non_sys += 1
+        if first_non_sys < len(history) and history[first_non_sys].get('role') == 'assistant':
+            history.insert(first_non_sys, {"role": "user", "content": [{"type": "text", "text": "(context trimmed)"}]})
 
 
 def trim_messages_history(history, context_win):
@@ -184,6 +288,10 @@ def trim_messages_history(history, context_win):
             if history and history[0].get('role') == 'user': history[0] = _sanitize_leading_user_msg(history[0])
             cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
         _cleanup_history_tool_boundaries(history)
+        # Ensure history ends with a user message (the pending turn for assistant to reply).
+        # Trailing assistant msgs after trim are orphaned; remove them.
+        while len(history) > 1 and history[-1].get('role') == 'assistant':
+            history.pop()
         cost = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
         print(f'[Debug] Trimmed context, current: {cost} chars, {len(history)} messages.')
 
@@ -501,8 +609,19 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                         d = _delay(r, attempt)
                         print(f"[LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
                         time.sleep(d); continue
-                    try: body = r.text.strip()[:500]
-                    except: body = ""
+                    try: body_full = r.text.strip(); body = body_full[:500]
+                    except: body_full = body = ""
+                    # Dump full payload + response on 400 for post-mortem diagnosis
+                    if r.status_code == 400:
+                        try:
+                            import datetime as _dt
+                            _dump = {"ts": _dt.datetime.now().isoformat(), "url": url,
+                                     "status": 400, "response_body": body_full,
+                                     "payload": payload}
+                            _dpath = os.path.join(os.path.dirname(__file__), "debug_400_dump.json")
+                            with open(_dpath, "w", encoding="utf-8") as _df:
+                                json.dump(_dump, _df, ensure_ascii=False, indent=1, default=str)
+                        except Exception: pass
                     # Structured-error diagnostic for 400: detect known patterns
                     diag = ""
                     if r.status_code == 400:
@@ -555,10 +674,13 @@ def _openai_stream(sess, messages):
         if temperature != 1: payload["temperature"] = temperature
         if sess.max_tokens: payload["max_completion_tokens" if ml.startswith(("gpt-5", "o1", "o2", "o3", "o4")) else "max_tokens"] = sess.max_tokens
         if sess.reasoning_effort: payload["reasoning_effort"] = sess.reasoning_effort
+        # --- 修复 Bug2a: PackyAPI 要求 conversation_id ---
+        if "packyapi.com" in (sess.api_base or ""):
+            payload["conversation_id"] = sess._session_id if hasattr(sess, '_session_id') else str(id(sess))
     tools = getattr(sess, 'tools', None)
     if tools: payload["tools"] = _prepare_oai_tools(tools, api_mode)
     if sess.service_tier: payload["service_tier"] = sess.service_tier
-    parse_fn = (lambda r: _parse_openai_sse(r.iter_lines(), api_mode)) if sess.stream else (lambda r: _parse_openai_json(r.json(), api_mode))
+    parse_fn = (lambda r, _t=None: _parse_openai_sse(r.iter_lines(), api_mode)) if sess.stream else (lambda r, _t=None: _parse_openai_json(r.json(), api_mode))
     return (yield from _stream_with_retry(sess, url, headers, payload, parse_fn))
         
 def _prepare_oai_tools(tools, api_mode="chat_completions"):
@@ -691,7 +813,8 @@ def _msgs_claude2oai(messages):
             m = {"role": "assistant"}
             if reasoning: m["reasoning_content"] = reasoning
             if text_parts: m["content"] = text_parts
-            else: m["content"] = ""
+            elif not tool_calls and not reasoning: m["content"] = "(empty)"
+            else: m["content"] = None
             if tool_calls: m["tool_calls"] = tool_calls
             result.append(m)
         elif role == "user":
@@ -813,6 +936,8 @@ def _ensure_thinking_blocks(messages, model):
 
 class ClaudeSession(BaseSession):
     def raw_ask(self, messages):
+        if not messages:
+            print("[WARN] ClaudeSession.raw_ask: empty messages, returning empty"); return ""
         if self.max_tokens is None: self.max_tokens = 8192
         messages = _fix_messages(messages)
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json", "anthropic-version": "2023-06-01", "anthropic-beta": "prompt-caching-2024-07-31"}
@@ -831,7 +956,10 @@ class ClaudeSession(BaseSession):
         return msgs
 
 class LLMSession(BaseSession):
-    def raw_ask(self, messages): return (yield from _openai_stream(self, messages))
+    def raw_ask(self, messages):
+        if not messages:
+            print("[WARN] LLMSession.raw_ask: empty messages, returning empty"); return ""
+        return (yield from _openai_stream(self, messages))
     def make_messages(self, raw_list): return _msgs_claude2oai(raw_list)
 
 def _fix_messages(messages):
@@ -863,6 +991,8 @@ class NativeClaudeSession(BaseSession):
         self._device_id = uuid.uuid4().hex + uuid.uuid4().hex[:32]
         self.tools = None
     def raw_ask(self, messages):
+        if not messages:
+            return {"role": "assistant", "content": "(empty input)", "empty_guard": True}
         messages = _ensure_thinking_blocks(_drop_unsigned_thinking(_fix_messages(messages)), self.model)
         # 非原生Anthropic节点: 第三方中转(如CodeWhisperer)不支持thinking block type
         if not self.api_key.startswith("sk-ant-"):
@@ -870,6 +1000,13 @@ class NativeClaudeSession(BaseSession):
                 _c = _m.get("content")
                 if isinstance(_c, list):
                     _m["content"] = [_b for _b in _c if not (isinstance(_b, dict) and _b.get("type") == "thinking")]
+        # --- 修复 Bug3: 过滤空 text content block (MiniMax等端点拒绝) ---
+        for _m in messages:
+            _c = _m.get("content")
+            if isinstance(_c, list):
+                _m["content"] = [_b for _b in _c if not (isinstance(_b, dict) and _b.get("type") == "text" and not _b.get("text", "").strip())]
+                if not _m["content"]:
+                    _m["content"] = [{"type": "text", "text": "(empty)"}]
         if self.max_tokens is None: self.max_tokens = 8192
         model = self.model
         beta_parts = ["claude-code-20250219", "interleaved-thinking-2025-05-14", "redact-thinking-2026-02-12", "prompt-caching-scope-2026-01-05"]
@@ -897,7 +1034,33 @@ class NativeClaudeSession(BaseSession):
         for idx in user_idxs[-2:]:
             messages[idx] = {**messages[idx], "content": list(messages[idx]["content"])}
             messages[idx]["content"][-1] = dict(messages[idx]["content"][-1], cache_control={"type": "ephemeral"})
-        url = auto_make_url(self.api_base, "messages") + '?beta=true'
+        # --- 方案A: 非原生Anthropic节点 payload/header 白名单清洗 ---
+        if not self.api_key.startswith("sk-ant-"):
+            _PAYLOAD_WHITELIST = {"model", "messages", "max_tokens", "stream", "temperature", "system", "tools", "tool_choice", "stop_sequences", "top_p", "top_k"}
+            for _pk in list(payload.keys()):
+                if _pk not in _PAYLOAD_WHITELIST:
+                    del payload[_pk]
+            # system: 去掉 cache_control
+            if "system" in payload and isinstance(payload["system"], list):
+                payload["system"] = [{"type": b.get("type", "text"), "text": b.get("text", "")} for b in payload["system"] if isinstance(b, dict)]
+            # tools: 去掉每个 tool 上的 cache_control
+            if "tools" in payload and isinstance(payload["tools"], list):
+                for _t in payload["tools"]:
+                    _t.pop("cache_control", None)
+            # messages: 去掉 content block 上的 cache_control
+            for _m in payload.get("messages", []):
+                _c = _m.get("content")
+                if isinstance(_c, list):
+                    for _b in _c:
+                        if isinstance(_b, dict):
+                            _b.pop("cache_control", None)
+            # headers: 去掉不兼容的 beta flags, 只保留基础版本头
+            headers.pop("anthropic-beta", None)
+            headers.pop("anthropic-dangerous-direct-browser-access", None)
+            headers.pop("x-app", None)
+        url = auto_make_url(self.api_base, "messages")
+        if self.api_key.startswith("sk-ant-"):
+            url += '?beta=true'
         # [DEBUG] dump payload to file for debugging
         if not self.api_key.startswith("sk-ant-"):
             try:
@@ -952,6 +1115,8 @@ class NativeClaudeSession(BaseSession):
 
 class NativeOAISession(NativeClaudeSession):
     def raw_ask(self, messages):
+        if not messages:
+            print("[WARN] NativeOAISession.raw_ask: empty messages, returning empty"); return ""
         messages = _fix_messages(messages)
         messages = _ensure_thinking_blocks(messages, self.model)
         return (yield from _openai_stream(self, _msgs_claude2oai(messages)))
@@ -1177,7 +1342,14 @@ class MixinSession:
             # Fallback时重新从target的history获取消息，避免跨provider格式不匹配
             # 所有backend的raw_ask都接收Claude格式，内部自行转换
             if attempt > 0:
-                args = (list(target.history),)
+                fallback_hist = list(target.history)
+                if not fallback_hist:
+                    # target history为空(广播未同步/浅拷贝)，从primary session获取
+                    fallback_hist = list(self._sessions[base].history)
+                if not fallback_hist:
+                    print(f'[MixinSession] WARN: empty history on fallback s{idx}, skip')
+                    continue
+                args = (fallback_hist,)
                 kwargs = {}
             gen = self._orig_raw_asks[idx](*args, **kwargs)
             print(f'[MixinSession] Using session ({self._sessions[idx].name})')
