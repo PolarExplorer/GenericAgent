@@ -88,7 +88,7 @@ def _history_tool_names(ctx: dict, lookback: int = None) -> set:
 # ---------------------------------------------------------------------------
 
 def _check_pattern_forbidden(params: dict, ctx: dict) -> dict:
-    """禁止模式：命中=fail，未命中=skip"""
+    """禁止模式：命中=fail，未命中=pass，无内容=skip"""
     scope = params.get("scope", "exec_only")
     lookback = params.get("lookback", 0)
     # tool_names filter: only check args from specified tools (e.g. write-only)
@@ -113,7 +113,7 @@ def _check_pattern_forbidden(params: dict, ctx: dict) -> dict:
     neg_ctx = params.get("negative_context")
     if _match_pattern(text, pattern, neg_ctx):
         return {"status": "fail", "reason": f"forbidden pattern matched: {pattern}"}
-    return {"status": "skip", "reason": "pattern not found (not triggered)"}
+    return {"status": "pass", "reason": "pattern not found (clean)"}
 
 
 def _check_pattern_required(params: dict, ctx: dict) -> dict:

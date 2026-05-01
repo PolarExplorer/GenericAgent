@@ -43,11 +43,11 @@ check("ps_type_file", "MISSING-PS-CAT-TYPE",
 
 check("ps_get_content_ok", "MISSING-PS-CAT-TYPE",
     {"tool_calls": [], "scripts": ["Get-Content file.txt"], "response_text": "", "user_message": ""},
-    "skip")
+    "pass")
 
 check("python_open_ok", "MISSING-PS-CAT-TYPE",
     {"tool_calls": [], "scripts": ["open('test.py').read()"], "response_text": "", "user_message": ""},
-    "skip")
+    "pass")
 
 check("empty_ctx", "MISSING-PS-CAT-TYPE",
     {"tool_calls": [], "scripts": [], "response_text": "", "user_message": ""},
@@ -100,15 +100,17 @@ check("no_trigger", "MISSING-PLAN-REREAD",
 # ===== 4. MISSING-VISION-ENUM-WINDOW (precondition) =====
 section("MISSING-VISION-ENUM-WINDOW")
 
-# 正例: 响应含"截图"但历史无枚举窗口 → fail
+# 正例: 响应含"截图"+有vision工具调用 但历史无枚举窗口 → fail
 check("screenshot_no_enum", "MISSING-VISION-ENUM-WINDOW",
-    {"tool_calls": [], "scripts": [], "response_text": "我来截图看看",
+    {"tool_calls": [{"tool_name": "code_run", "args": {}}],
+     "scripts": [], "response_text": "我来截图看看",
      "user_message": "", "history": []},
     "fail")
 
-# 反例: 响应含"截图"且历史有"枚举窗口" → pass
+# 反例: 响应含"截图"+有vision工具调用 且历史有"枚举窗口" → pass
 check("screenshot_with_enum", "MISSING-VISION-ENUM-WINDOW",
-    {"tool_calls": [], "scripts": [], "response_text": "我来截图看看",
+    {"tool_calls": [{"tool_name": "code_run", "args": {}}],
+     "scripts": [], "response_text": "我来截图看看",
      "user_message": "",
      "history": [{"tool_calls": [], "response_text": "先枚举窗口确认目标"}]},
     "pass")
@@ -122,15 +124,17 @@ check("no_vision_keyword", "MISSING-VISION-ENUM-WINDOW",
 # ===== 5. MISSING-LJQ-ACTIVATE (precondition) =====
 section("MISSING-LJQ-ACTIVATE")
 
-# 正例: 响应含"点击"但历史无activate → fail
+# 正例: 响应含"键鼠操作"+有code_run 但历史无activate → fail
 check("click_no_activate", "MISSING-LJQ-ACTIVATE",
-    {"tool_calls": [], "scripts": [], "response_text": "现在点击确认按钮",
+    {"tool_calls": [{"tool_name": "code_run", "args": {}}],
+     "scripts": [], "response_text": "用键鼠操作点击确认按钮",
      "user_message": "", "history": []},
     "fail")
 
-# 反例: 响应含"键鼠"且历史有"激活窗口" → pass
+# 反例: 响应含"键鼠操作"+有code_run 且历史有"激活窗口" → pass
 check("keyboard_with_activate", "MISSING-LJQ-ACTIVATE",
-    {"tool_calls": [], "scripts": [], "response_text": "用键鼠操作",
+    {"tool_calls": [{"tool_name": "code_run", "args": {}}],
+     "scripts": [], "response_text": "用键鼠操作",
      "user_message": "",
      "history": [{"tool_calls": [], "response_text": "已激活窗口到前台"}]},
     "pass")
@@ -144,16 +148,18 @@ check("no_ljq_keyword", "MISSING-LJQ-ACTIVATE",
 # ===== 6. MISSING-MEM-L0-READ (precondition) =====
 section("MISSING-MEM-L0-READ")
 
-# 正例: 响应含写记忆动作但历史无L0读取 → fail
+# 正例: file_patch写memory路径 但历史无L0读取 → fail
 check("mem_write_no_l0", "MISSING-MEM-L0-READ",
-    {"tool_calls": [], "scripts": [],
+    {"tool_calls": [{"tool_name": "file_patch", "args": {"path": "memory/global_mem.txt"}}],
+     "scripts": [],
      "response_text": "修改 memory/global_mem.txt file_patch写入新内容",
      "user_message": "", "history": []},
     "fail")
 
-# 反例: 响应含写记忆且历史有META-SOP → pass
+# 反例: file_patch写memory路径 且历史有META-SOP → pass
 check("mem_write_with_l0", "MISSING-MEM-L0-READ",
-    {"tool_calls": [], "scripts": [],
+    {"tool_calls": [{"tool_name": "file_patch", "args": {"path": "memory/global_mem.txt"}}],
+     "scripts": [],
      "response_text": "修改 memory/global_mem.txt file_patch写入新内容",
      "user_message": "",
      "history": [{"tool_calls": [{"tool_name": "file_read", "args": {}}],
