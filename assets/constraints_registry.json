@@ -657,20 +657,6 @@
       "active": true
     },
     {
-      "id": "R002",
-      "name": "编码前必须 file_read",
-      "category": "执行纪律",
-      "source": "RULES #3",
-      "detection": {
-        "type": "sequence_check",
-        "before_tool": "file_patch",
-        "required_prior": "file_read"
-      },
-      "active": true,
-      "status": "inactive",
-      "inactive_reason": "冗余：已被DSL规则语义覆盖"
-    },
-    {
       "id": "R003",
       "name": "征询措辞时禁止执行工具",
       "category": "交互纪律",
@@ -749,20 +735,6 @@
       "active": true
     },
     {
-      "id": "R010",
-      "name": "未查证不得断言",
-      "category": "验证纪律",
-      "source": "CONSTITUTION #2",
-      "detection": {
-        "type": "duplicate",
-        "duplicate_of": "R007",
-        "description": "No evidence/no claim 语义与 R007 重复"
-      },
-      "active": false,
-      "status": "inactive",
-      "inactive_reason": "冗余：已被DSL规则语义覆盖"
-    },
-    {
       "id": "R011",
       "name": "失败按 debugging_sop 分阶段升级",
       "category": "调试纪律",
@@ -831,20 +803,6 @@
       "active": true
     },
     {
-      "id": "R017",
-      "name": "改前必读，禁止猜路径",
-      "category": "编码纪律",
-      "source": "RULES #1/#3",
-      "detection": {
-        "type": "duplicate",
-        "duplicate_of": "R002",
-        "description": "编码改文件前必须file_read由R002 sequence_check覆盖核心违规路径"
-      },
-      "active": false,
-      "status": "inactive",
-      "inactive_reason": "冗余：已被DSL规则语义覆盖"
-    },
-    {
       "id": "R018",
       "name": "Git 操作必须完整闭环",
       "category": "工程纪律",
@@ -854,20 +812,6 @@
         "description": "涉及 Git 的任务需完成 status/diff/test/commit或明确不提交等闭环"
       },
       "active": true
-    },
-    {
-      "id": "R019",
-      "name": "进程操作禁止无条件杀 python",
-      "category": "进程安全",
-      "source": "RULES #5",
-      "detection": {
-        "type": "duplicate",
-        "duplicate_of": "R008",
-        "description": "禁止无条件杀 python 与 R008 已自动检测项重复"
-      },
-      "active": false,
-      "status": "inactive",
-      "inactive_reason": "冗余：已被DSL规则语义覆盖"
     },
     {
       "id": "R020",
@@ -922,31 +866,6 @@
       "category": "验证纪律",
       "source": "RULES #4",
       "detection": "engine",
-      "active": true
-    },
-    {
-      "id": "R025",
-      "name": "用户征询措辞只给建议不执行",
-      "category": "交互纪律",
-      "source": "RULES #13",
-      "detection": {
-        "type": "duplicate",
-        "duplicate_of": "R003",
-        "description": "用户征询措辞禁止执行工具已由R003 context_check覆盖"
-      },
-      "active": false,
-      "status": "inactive",
-      "inactive_reason": "冗余：已被DSL规则语义覆盖"
-    },
-    {
-      "id": "R026",
-      "name": "执行类子任务按分发纪律走 subagent",
-      "category": "分发纪律",
-      "source": "RULES #14",
-      "detection": {
-        "type": "manual",
-        "description": "编码/信息收集/数据处理执行类子任务应按模型分发纪律交给肌肉模型；连续≥3轮同类执行需反思"
-      },
       "active": true
     },
     {
@@ -1022,34 +941,6 @@
       "active": true
     },
     {
-      "id": "R034",
-      "name": "密钥/敏感信息禁止展示",
-      "category": "安全纪律",
-      "source": "CONSTITUTION #7",
-      "detection": {
-        "type": "duplicate",
-        "duplicate_of": "C004",
-        "description": "敏感文件读取/展示由C004 sensitive_access与C020 secret literal检测覆盖主要违规路径"
-      },
-      "active": false,
-      "status": "inactive",
-      "inactive_reason": "冗余：已被DSL规则语义覆盖"
-    },
-    {
-      "id": "R035",
-      "name": "写长期记忆需同步 L1 索引",
-      "category": "记忆纪律",
-      "source": "Memory rules",
-      "detection": {
-        "type": "duplicate",
-        "duplicate_of": "C034",
-        "description": "L2/L3 变化同步 L1 语义与 C034 重复"
-      },
-      "active": false,
-      "status": "inactive",
-      "inactive_reason": "冗余：已被DSL规则语义覆盖"
-    },
-    {
       "id": "R036",
       "name": "遇到模糊需求先给合理方案再问是否调整",
       "category": "交互规则",
@@ -1093,18 +984,6 @@
       },
       "added": "2026-04-27",
       "active": true
-    },
-    {
-      "id": "R040",
-      "name": "改完主动跑 test/lint/build 验证",
-      "category": "验证规则",
-      "source": "用户全局CLAUDE.md",
-      "detection": {
-        "type": "retired",
-        "description": "已删除：verify_sop+Constitution#2已覆盖，precondition引擎无法表达后置语义，19次中18次误报"
-      },
-      "added": "2026-04-27",
-      "active": false
     },
     {
       "id": "R041",
@@ -1323,7 +1202,7 @@
         "scope": "tool_args",
         "description": "检测未使用 ./autonomous_reports/ 的裸 autonomous_reports 路径"
       },
-      "enabled": true
+      "active": true
     },
     {
       "id": "R060",
@@ -1338,7 +1217,7 @@
         "scope": "exec_only",
         "description": "飞书CLI在Windows必须shell=True"
       },
-      "enabled": true
+      "active": true
     },
     {
       "id": "R061",
@@ -1348,7 +1227,7 @@
       "source": "RULES #14",
       "description": "连续>=3轮主Agent直接执行编码/信息收集类工具调用而未委托subagent，视为违规。",
       "detection": "engine",
-      "enabled": true
+      "active": true
     },
     {
       "id": "R062",
@@ -1363,7 +1242,7 @@
         "scope": "tool_args",
         "description": "检测透明背景图片仍使用 gpt-image-2"
       },
-      "enabled": true
+      "active": true
     },
     {
       "id": "R063",
@@ -1375,7 +1254,7 @@
       "detection": {
         "type": "manual"
       },
-      "enabled": true
+      "active": true
     },
     {
       "id": "R064",
@@ -1390,10 +1269,10 @@
         "scope": "tool_args",
         "description": "检测教科书式写作开头/套话"
       },
-      "enabled": true
+      "active": true
     },
     {
-      "id": "R064",
+      "id": "R066",
       "name": "写作禁止编造假设性真实案例",
       "category": "writing",
       "priority": "medium",
@@ -1405,7 +1284,7 @@
         "scope": "tool_args",
         "description": "检测疑似编造假设性真实案例的表达"
       },
-      "enabled": true
+      "active": true
     },
     {
       "id": "R065",
@@ -1420,7 +1299,7 @@
         "scope": "exec_only",
         "description": "检测创建/注册定时任务时未设置 max_delay_hours"
       },
-      "enabled": true
+      "active": true
     }
   ]
 }
