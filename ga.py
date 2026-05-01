@@ -566,6 +566,16 @@ class GenericAgentHandler(BaseHandler):
                     _vids = ', '.join(v.get('constraint_id', '?') for v in _violations[:5])
                     _vsum = '\n'.join(f"  - [{v.get('constraint_id','?')}] {v.get('reason','')}" for v in _violations[:5])
                     next_prompt += f"\n[ENGINE] 约束引擎检测到 {len(_violations)} 项违规 ({_vids})：\n{_vsum}"
+                    # === Auto-remediation: inject MUST instructions for recoverable constraint failures ===
+                    _remediations = []
+                    for _v in _violations[:5]:
+                        _vid = _v.get('constraint_id', '')
+                        if _vid == 'REG-R009':
+                            _remediations.append('[MUST] 你刚刚因决策前未查记忆/SOP而触发 REG-R009。在调用任何执行类工具（file_write/file_patch/code_run/web_execute_js等）之前，必须先 file_read 相关SOP或全局记忆文件。')
+                        elif _vid == 'REG-R040':
+                            _remediations.append('[MUST] 你刚刚因修改代码后未运行验证而触发 REG-R040。在本轮或下一轮中，必须调用 code_run 执行 test/lint/build/语法检查，并在结果中汇报验证状态。')
+                    if _remediations:
+                        next_prompt += '\n' + '\n'.join(_remediations)
         except Exception:
             pass
         # === END Constraint Engine Monitor ===

@@ -302,6 +302,22 @@ def _extract_subagent_from_command(command):
     lowered = command.lower()
     if "agentmain.py" not in lowered:
         return None
+    # Strip triple-quoted string contents to avoid matching agentmain.py
+    # that only appears inside string literals (e.g. test/debug scripts).
+    _stripped = re.sub(r'"""[\s\S]*?"""', '', command)
+    _stripped = re.sub(r"'''[\s\S]*?'''", '', _stripped)
+    if "agentmain.py" not in _stripped.lower():
+        return None
+    # Real subagent launches use subprocess.Popen / os.system / os.popen.
+    # If none of these appear outside string literals, this is likely a
+    # test/debug script that merely references agentmain.py in data.
+    _has_launcher = any(kw in _stripped for kw in (
+        "subprocess.Popen", "subprocess.run", "subprocess.call",
+        "os.system", "os.popen", "Popen(",
+    ))
+    if not _has_launcher and "agentmain.py" not in _stripped.split("'")[0].lower():
+        # agentmain.py only appears inside single-quoted strings
+        return None
     markers = ("--task", "--input", "--llm_no", "--bg")
     if not any(marker in lowered for marker in markers):
         return None
@@ -313,6 +329,8 @@ def _extract_subagent_from_command(command):
             rf"{re.escape(flag_name)}\s+'([^']+)'",
             rf'{re.escape(flag_name)}\s+(\S+)',
             rf'{re.escape(flag_name)}=([^\s]+)',
+            # Popen list format: "--flag", "value" or '--flag', 'value'
+            rf'''['\"]{re.escape(flag_name)}['\"],\s*['\"]([^'\"]+)['\"]''',
         ]
         for pattern in patterns:
             m = re.search(pattern, command)
@@ -359,6 +377,18 @@ def _extract_subagent_from_command(command):
     # Truncate input to summary for readability
     if "input" in result and isinstance(result["input"], str) and len(result["input"]) > 120:
         result["input"] = result["input"][:120] + "…"
+    # Fallback: when --task flag parsing fails (e.g. Python Popen list syntax),
+    # try extracting from variable assignment or SUBAGENT DISPATCH comment.
+    if "task" not in result:
+        # 1) task_name = "value" or task_name = 'value'
+        _m = re.search(r'task_name\s*=\s*["\']([^"\']+)["\']', command)
+        if _m:
+            result["task"] = _m.group(1)
+        else:
+            # 2) # SUBAGENT DISPATCH: ... task=value
+            _m2 = re.search(r'SUBAGENT\s+DISPATCH[^\n]*?task\s*=\s*(\S+)', command)
+            if _m2:
+                result["task"] = _m2.group(1).rstrip(',)')
     return result
 
 

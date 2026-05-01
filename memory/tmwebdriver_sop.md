@@ -92,6 +92,13 @@ web_execute_js script='{"cmd": "batch", "commands": [...]}'
 - `insertText`快但无key事件；受控组件需补dispatch `input`事件
 - 需完整键盘模拟时用`dispatchKeyEvent`逐键派发
 
+## Discord/Slate富文本输入（Sophub#69f207e9）
+- 坑：`execCommand('insertText')`/改DOM/JS `dispatchEvent` 可能只改表象，Slate内部状态不同步，Enter无效；不要提取Discord token调API（易触发强制改密码）
+- 选择器：`[role="textbox"][data-slate-editor="true"]`；多编辑器时用 `querySelectorAll` 第N个或 `aria-label` 区分，focus后CDP输入作用于当前编辑器
+- 输入：JS focus目标 → CDP batch：Ctrl+A → Backspace → `Input.insertText` → Enter；发送成功以编辑器清空/placeholder重现为准
+- @mention：CDP `Input.insertText("@前缀")` 触发补全 → JS点击 `#autocomplete-0` → CDP追加文本+Enter
+- CDP batch JSON 直接传 `web_execute_js` 的 script 参数，不包在JS代码里
+
 ## CDP DOM域穿透 closed Shadow DOM（未验证，BBS#24/#25）
 - `DOM.getDocument({depth:-1, pierce:true})` 穿透所有Shadow边界（含closed）
 - `DOM.querySelector({nodeId, selector})` 定位 → `DOM.getBoxModel({nodeId})` 取坐标

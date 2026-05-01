@@ -166,7 +166,28 @@ check("no_mem_action", "MISSING-MEM-L0-READ",
      "user_message": "", "history": []},
     "skip")
 
-# ===== 7. MISSING-TOOL-DISPATCH-TYPE (llm_judge) =====
+# ===== 7. REG-C018 / REG-C027 sequence false-positive regressions =====
+section("REG-C018 / REG-C027 sequence regressions")
+
+# 反例: .bat 脚本修改不是新项目编码，也不是 UI 开发，不应触发 C018/C027
+bat_write_ctx = {
+    "tool_calls": [{"tool_name": "file_write", "args": {"path": r"C:\\Users\\ZhuanZ（无密码）\\Desktop\\重启GA.bat"}}],
+    "scripts": [], "response_text": "", "user_message": "", "history": []
+}
+check("c018_bat_write_not_new_project", "REG-C018", bat_write_ctx, "skip")
+check("c027_bat_write_not_ui", "REG-C027", bat_write_ctx, "skip")
+
+# 反例: GA 自身/temp 内实验写代码和 UI 文件不按外部新项目/UI mockup 规则误报
+check("c018_temp_code_excluded", "REG-C018",
+    {"tool_calls": [{"tool_name": "file_write", "args": {"path": r"D:\\AI\\GenericAgent\\temp\\NewTool\\main.py"}}],
+     "scripts": [], "response_text": "", "user_message": "", "history": []},
+    "skip")
+check("c027_temp_ui_excluded", "REG-C027",
+    {"tool_calls": [{"tool_name": "file_write", "args": {"path": r"D:\\AI\\GenericAgent\\temp\\NewUI\\index.html"}}],
+     "scripts": [], "response_text": "", "user_message": "", "history": []},
+    "skip")
+
+# ===== 8. MISSING-TOOL-DISPATCH-TYPE (llm_judge) =====
 section("MISSING-TOOL-DISPATCH-TYPE")
 
 # 正例: 响应含"分发"触发词 → pending_llm

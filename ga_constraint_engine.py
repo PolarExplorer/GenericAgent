@@ -310,15 +310,20 @@ def _check_sequence(params: dict, ctx: dict) -> dict:
     last_step = steps[trigger_step]
 
     # 检查最后一步是否在当前轮触发
-    triggered = False
+    # 同一步同时声明 tool_names 与 pattern 时必须全部满足（AND），
+    # 避免“任意 file_write”绕过后缀 pattern 造成误报。
+    has_trigger_condition = False
+    tool_match = True
+    pattern_match = True
     if "tool_names" in last_step:
-        if _tool_names(ctx) & set(last_step["tool_names"]):
-            triggered = True
+        has_trigger_condition = True
+        tool_match = bool(_tool_names(ctx) & set(last_step["tool_names"]))
     if "pattern" in last_step:
+        has_trigger_condition = True
         text = _get_all_text(ctx, last_step.get("scope", "all"))
-        if _match_pattern(text, last_step["pattern"]):
-            triggered = True
+        pattern_match = bool(_match_pattern(text, last_step["pattern"]))
 
+    triggered = has_trigger_condition and tool_match and pattern_match
     if not triggered:
         return {"status": "skip", "reason": "sequence endpoint not triggered"}
 

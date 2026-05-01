@@ -115,22 +115,28 @@
     },
     {
       "id": "MISSING-MEM-L0-READ",
-      "name": "写记忆前必须读META-SOP(L0)",
-      "source": "assets/insight_fixed_structure.txt:2",
+      "name": "写长期记忆前必须读META-SOP(L0)",
+      "source": "CONSTITUTION #8 / memory_management_sop",
       "check_type": "precondition",
       "params": {
         "action": {
-          "scope": "all",
-          "pattern": "(memory/.*\\.(md|txt)|global_mem|insight|记忆).*(file_write|file_patch|写入|修改)"
+          "tool_names": [
+            "file_write",
+            "file_patch"
+          ],
+          "scope": "path_only",
+          "pattern": "memory[\\\\/](?:global_mem(?:_insight)?\\.txt|.*_sop\\.md|.*\\.md|.*\\.txt)"
         },
         "precondition": {
-          "lookback": 3,
+          "lookback": 5,
           "tool_names": [
             "file_read"
           ],
-          "response_pattern": "(META-SOP|memory_management_sop|L0)"
+          "response_pattern": "(?:META-SOP|memory_management_sop|L0)"
         }
-      }
+      },
+      "severity": "critical",
+      "description": "任何file_write/file_patch写入memory下长期记忆文件前，近5轮必须实际读取META-SOP(L0)"
     },
     {
       "id": "REG-C001",
@@ -659,7 +665,7 @@
           "scope": "path_only"
         },
         "precondition": {
-          "lookback": 10,
+          "lookback": 5,
           "tool_names": [
             "code_run",
             "web_scan",
@@ -670,7 +676,31 @@
         }
       },
       "severity": "high",
-      "description": "写入L1/L2/L3记忆文件前，近5轮必须有工具调用获取证据"
+      "description": "写入L1/L2/L3记忆文件前，近5轮必须有成功工具调用获取证据"
+    },
+    {
+      "id": "REG-C031-WM-BEFORE-LTM",
+      "name": "写长期记忆前必须先更新工作记忆检查点",
+      "source": "C031 / memory_management_sop",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "tool_names": [
+            "file_write",
+            "file_patch"
+          ],
+          "pattern": "memory[\\\\/](?:global_mem(?:_insight)?\\.txt|.*_sop\\.md|.*\\.md|.*\\.txt)",
+          "scope": "path_only"
+        },
+        "precondition": {
+          "lookback": 5,
+          "tool_names": [
+            "update_working_checkpoint"
+          ]
+        }
+      },
+      "severity": "high",
+      "description": "长期记忆写入前，近5轮必须先把证据和写入意图压入工作记忆，避免无依据蒸馏"
     },
     {
       "id": "REG-C034",
@@ -780,18 +810,18 @@
             "tool_names": [
               "file_read"
             ],
-            "pattern": "memory[\\\\/]"
+            "pattern": "memory[\\\\/](?:global_mem|.*_sop|memory_management_sop)"
           },
           {
-            "pattern": "(?s)(?=.*(?:_sop|SOP|memory[\\\\/]|记忆|约束引擎|constraint_engine|scheduled_task|autonomous)).*(?:开始|执行|实施|implement|start)"
+            "pattern": "(?s)(?=.*(?:_sop|SOP|memory[\\\\/]|记忆|约束引擎|constraint_engine|scheduled_task|autonomous|长期记忆|写记忆|dispatch|model_dispatch|tool_dispatch)).*(?:开始|执行|实施|修改|写入|升级|配置|implement|start|patch|update)"
           }
         ],
         "trigger_step": 1,
         "lookback": 20,
-        "description": "涉及SOP领域的操作前应先读取memory/（扩大回溯窗口到10轮）"
+        "description": "涉及SOP/记忆/约束引擎/分发等领域的执行或配置修改前，必须先读取对应memory/资料"
       },
-      "severity": "low",
-      "description": "涉及SOP关键词的操作前应先file_read memory/（lookback=10）"
+      "severity": "medium",
+      "description": "涉及SOP关键词的操作前应先file_read memory/；从low提升到medium并扩大触发词"
     },
     {
       "id": "REG-R049",
@@ -850,6 +880,7 @@
               "file_write"
             ],
             "pattern": "(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)$",
+            "scope": "path_only",
             "exclude_pattern": "(?:GenericAgent|temp)[\\\\/]"
           }
         ],
@@ -875,6 +906,7 @@
               "file_write"
             ],
             "pattern": "(?:\\.html|\\.css|\\.vue|\\.tsx|\\.jsx)$",
+            "scope": "path_only",
             "exclude_pattern": "(?:GenericAgent|temp)[\\\\/]"
           }
         ],
