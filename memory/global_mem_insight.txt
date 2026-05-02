@@ -4,7 +4,7 @@
 定时:scheduled_task_sop | 自主:autonomous_operation_sop | watchdog/反射:agentmain --reflect | Bot守护(daemon+schtasks提权):L2 | 防变砖(script_guard写入拦截+ga_watchdog外部看门狗+memory自动commit):L2 | 健康检查(script_health_check.py扫memory/*.py self_test+health_reflect.py reflect脚本, watchdog已集成)
 手机:adb_ui.py
 多Bot资源锁: ga_resource_lock.py(Windows Named Mutex, 浏览器锁+键鼠锁, 多通道自动排队)
-脚本化CLI: scripts/(端口/服务/API诊断/history/debug/git/记忆搜索/任务初始化/OCR/文档/浏览器/ADB, 详见L2)
+脚本化CLI: scripts/(端口ga_ports/服务ga_service/API诊断ga_diag_api/history ga_history/调试ga_debug_collect/git ga_git_safe/记忆搜索ga_mem_find/任务初始化ga_task_init/OCR ga_ocr/文档ga_doc/浏览器ga_web/ADB ga_adb, 详见L2)
 文件搜索: es(~/tools/Everything/es.exe, Everything v1.4.1 portable后台服务, 索引C+D盘) 大规模文件查询直接用es, 禁PS递归/dir遍历
 
 需要时read L2 或 ls ../memory/ 查L3

@@ -99,20 +99,20 @@
 - 效果: 微信/飞书/主窗口多Bot并发时，浏览器和键鼠操作自动排队，无需用户预判
 
 ## [脚本化CLI工具集] <!-- updated: 2026-05-02 -->
-- 目录: scripts/ (14文件, 统一argparse CLI)
+- 目录: scripts/ (15文件, 统一argparse CLI)
 - 基础: __init__.py, _common.py(GA_ROOT/find_free_port/kill_proc等公共函数)
 - 端口诊断: ga_ports.py (list/check/kill/tree) — 端口占用巡检与清理
-- 服务管理: ga_service.py (restart/status/doctor) — GA服务重启与健康检查
-- API诊断: ga_api.py (ping/roundtrip) — API端点连通性与延迟测试
-- History: ga_history.py (lint/heal) — history文件合法性检查与修复
-- 调试: ga_debug.py (snapshot/env) — 快速诊断快照(端口+进程+API+GPU)
-- Git: ga_git.py (st/sync/log) — Git状态/同步/日志
-- 记忆搜索: ga_memsearch.py (search) — memory/全文检索
-- 任务初始化: ga_init.py (task) — 新任务工作区初始化
-- OCR: ga_ocr.py — 本地OCR识别
-- 文档: ga_doc.py — 文档读取/创建(PDF/docx/xlsx)
-- 浏览器: ga_web.py — 浏览器操作(navigate/extract/screenshot/frames)
-- ADB: ga_adb.py — 手机ADB操作(status/screenshot/tap/text)
+- 服务管理: ga_service.py (restart/status TARGET/doctor) — GA服务重启与健康检查
+- API诊断: ga_diag_api.py (analyze --file/recent/hint) — API日志分析与诊断建议
+- History: ga_history.py (lint FILE/heal FILE) — history文件合法性检查与修复
+- 调试: ga_debug_collect.py (--target ga|audit|feishu|wechat|all) — 快速诊断ZIP打包
+- Git: ga_git_safe.py (status/stage/commit) — Git状态/暂存/提交
+- 记忆搜索: ga_mem_find.py (QUERY [--level L1|L2|L3|all] [--issues]) — memory/全文检索
+- 任务初始化: ga_task_init.py (init NAME/clean) — 新任务工作区初始化与清理
+- OCR: ga_ocr.py (run FILE) — 本地OCR识别(图片/PDF)
+- 文档: ga_doc.py (read/images/merge) — 文档读取/提取图片/合并PDF
+- 浏览器: ga_web.py (open/extract/screenshot/frames [--timeout]) — CDP浏览器操作
+- ADB: ga_adb.py (status/screenshot/tap/text) — 手机ADB操作(需adb已安装)
 - 使用: python scripts/ga_xxx.py subcommand [args]
 
 ## [约束引擎接入] <!-- updated: 2026-04-28 -->
