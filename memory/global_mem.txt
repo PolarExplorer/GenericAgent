@@ -1,0 +1,149 @@
+# [Global Memory - L2]
+
+## [飞书CLI] <!-- updated: 2026-04-26 -->
+- 包: @larksuite/cli v1.0.19 (npm install -g @larksuite/cli)
+- 配置: ~/.lark-cli/config.json (App ID已配置, 密钥脱敏存储)
+- 调用: subprocess.run('lark-cli ...', shell=True) ← Windows必须shell=True才能识别.cmd
+- Skills: 23个lark skill已装(~/.agents/skills/lark-*), 含im/calendar/base/sheets/doc/contact/task等
+- 身份: user"三十三"已授权(--domain all全scope), Bot身份也可用
+- Shortcut命令: `lark-cli <domain> +<shortcut>` (如 `calendar +agenda`, `im +send`)
+- Scope不足时: `lark-cli auth login --domain <domain> --no-wait --json` 获取授权URL(增量授权)
+
+## [API代理服务] <!-- updated: 2026-04-25 -->
+- PackyAPI Claude端点: `https://www.packyapi.com` (旧域名api-slb.packyapi.com/claude/office已失效)
+- Right Code Codex端点: `https://right.codes/codex/v1`
+- Right Code Claude端点: `https://www.right.codes/claude/office`
+- PackyAPI GPT-5.5端点: `https://www.packyapi.com/v1` (native_oai_config3, right.codes备用通道)
+- 配置文件: `D:\AI\GenericAgent\mykey.py` (mixin_config含claude-main/claude-backup/gpt-5.4三节点 + native_oai_config2=right.codes gpt-5.5 + native_oai_config3=packyapi gpt-5.5备份)
+- **Images API**: right.codes/gpt/v1 端点支持gpt-image-2(非流式responses.create)，image_gen_utils.py已更新
+
+## [Codex CLI] <!-- updated: 2026-04-25 -->
+- 路径: `C:\Users\ZhuanZ（无密码）\AppData\Roaming\npm\codex`
+- 配置: `~/.codex/config.toml` (provider=packycode, model=gpt-5.5)
+- 认证: `~/.codex/auth.json` (OPENAI_API_KEY，与代理key相同)
+- **关键限制**: `codex exec` 模式不暴露内置 `image_gen` 工具，需用非exec模式
+- 图片生成: `codex exec -i 图片路径 --full-auto "prompt"` 传图片但exec无image_gen
+- 图片生成备用: `codex -i 图片路径 "prompt"` (非exec模式，有image_gen工具)
+
+## [用户偏好与协作原则] <!-- updated: 2026-04-25 -->
+- 身份: 用户体验设计师出身，非程序员。用Agent做开发产品+知识管理。重复3遍的事→AI化/自动化
+- 技术决策: 说「为什么」和「对用户的影响」，不要只讲实现
+- 第一性原理: 从问题本质出发，不因惯例照搬。回到问题本身→要解决什么→最直接路径→从零设计会怎么做
+- 反谄媚: 禁夸想法好/禁「这是个很好的问题」/禁「当然可以」开头。给真实判断，方案有问题直接指出，发现更好做法直接说
+- 约束先行: 新项目先写规范，新目录先定结构约定。没有规范不动手。需调整规范→先改文档再改实践
+- 交互设计最高准则: 用户体验优先级 > 技术偏好/代码整洁/架构优雅。用户触碰的每一层必须丝滑
+  - 为目标设计不为功能设计 | 不让用户思考 | 系统承担复杂性 | 渐进式展示 | 反馈引导行动
+- 工作方式: 默认中文(代码英文) | 结论先行再给理由 | 模糊需求先给最合理方案再问调整 | 禁问「你确定吗」除非真实风险 | 先给建议等用户拍板再动手执行(禁自作主张直接操作)
+- 苏格拉底法(追问): 需求歧义度高或操作不可逆时，先用≤2个精准问题锁定关键变量再执行；简单明确任务直接做不啰嗦
+- 苏格拉底法(自检): 复杂任务执行前，thinking中完成五问——①目标对了吗 ②假设成立吗 ③有更简单做法吗 ④失败能回滚吗 ⑤用户是在征询意见还是下达指令？征询→只输出建议,禁调工具
+- 图片生成: 默认用image_gen_utils.py(right.codes/gpt/v1端点+gpt-image-2，非流式)。透明背景需降级gpt-image-1.5
+- 开发: 改完主动验证(test/lint/build) | 禁注释掉报错要找根因 | 密钥不进代码
+- Codex验证: Codex/GPT-5.5返回结果不可裸信"done"，必须验证闭环(跑测试/截图确认/diff review)，尤其复杂或边界任务
+- 桌面文档默认位置: 用户要求以后凡是在桌面生成文档，默认放「桌面/AI产出/」；按需在其下建子目录分类(设计文档/微信素材/提取文档/生成图片等)；「桌面/AI学习/」只放外部学习资料(PDF/课件等)
+- Git: commit英文简洁 | git push等用户说 | 部署走项目自己的命令
+- 模型分发: 执行类子任务(编码/信息收集/数据处理)必须走subagent分发给肌肉模型，大脑只做规划决策验证。连续≥3轮同类执行→强制反思分发。详见model_dispatch_sop分发门
+
+## [问题修复记录] <!-- updated: 2026-05-01 -->
+- **飞书bot模型显示不生效+旧进程抢占ws** (2026-04-29): 三个根因叠加：①`if exit_reason / elif summary`的if/elif结构导致有exit_reason时summary分支被跳过，模型信息丢失 ②重启daemon后旧子进程(PID不同)仍存活抢占websocket连接，新进程收不到消息 ③pythonw stdout重定向到文件时默认全缓冲，print(flush=True)不可靠。教训: **重启长驻服务必须先tasklist查所有同名进程再全部清理，不能只靠daemon的stop机制**；改.py文件后必须清`__pycache__`或设`PYTHONDONTWRITEBYTECODE=1`防止pyc缓存；daemon启动子进程必须设`PYTHONUNBUFFERED=1`；if/elif加新分支时检查所有分支是否都需要新逻辑
+- **ga_audit hot-reload命名空间分裂** (2026-04-28): `exec(src, ns)`新建ns命名空间，新函数__globals__→ns，preserved状态恢复到mod.__dict__但ns中仍是None，导致_on_turn_end读_agent_ref=None→task_id永久丢失。修复: exec后`ns.update(preserved)`再patch函数。教训: exec+setattr模式必须确保preserved同时注入ns和mod
+- **subagent产出文件写到cwd而非目标dir** (2026-04-30): 升级3 subagent将skill_solidifier.py写到temp/而非memory/，ModuleNotFoundError。教训: **subagent编码任务prompt必须显式指定输出文件绝对路径**，brain验收时先检查文件是否在正确位置再跑测试
+- **subagent验收标准必须基于真实API** (2026-04-30): 升级2首次分发时验收标准假设了错误的keychain API格式，subagent中途停下提问。教训: **分发前先file_read被改文件确认实际接口，再写验收标准**；不能凭记忆或plan描述假设API
+- **OAI兼容端点assistant空content触发400** (2026-05-01): `_msgs_claude2oai()`中assistant消息无text block时`content=""`空字符串，当该消息同时携带tool_calls时，OAI兼容API校验"must have content/reasoning_content or tool_calls"失败返回400（空字符串≠None，被视为无有效content）。修复: L700改为有tool_calls时content=None，无tool_calls且无text时content="(empty)"占位。教训: **OAI格式assistant消息有tool_calls时content必须为None而非空字符串**；Claude→OAI转换层需对每种角色的空值语义做区分处理
+- **SOP评估/收录闭环与约束误报处理** (2026-04-30): 用户给Sophub SOP问“是否有帮助”时，先直接评估网页、后补查记忆，触发REG-R009；确认“按你说的办”后又因summary/连续执行警告导致需要用户多次“继续”。教训: ①资料/SOP评估前先查现有相关记忆再判断收录位置 ②用户确认执行后按“读规范→改动→验证→仅暂存本次hunk→commit→汇报”闭环推进，除非不可逆风险不等待催促 ③遇到约束引擎疑似误报（如GUI/定时关键词串扰）当轮说明并继续真实任务 ④memory仓库脏工作区时禁止git add -A，用patch/index精确暂存本次改动
+- **raw_ask空messages致IndexError崩溃** (2026-05-01): MixinSession._raw_ask fallback路径用`target.history[-1]`但history可能为空列表→IndexError→后端崩溃。同时4个raw_ask入口均未对空messages做防御。修复: Layer1=fallback处空history检查；Layer2=4个入口加空messages早期返回guard(commit c169c00)。教训: **任何取history[-1]的代码必须先检查非空**；多session继承链中fallback路径是空状态高发区需逐层防御
+- **Responses API孤儿tool消息致400** (2026-05-01): tool角色消息的tool_call_id在前序assistant消息中无对应function_call→生成orphan function_call_output→Responses API 400。_sanitize_responses_tool_chain已有清理但依赖上游正确构建。教训: **Claude→Responses转换时tool_call_id映射必须完整**；sanitize层是最后防线不应常态触发
+- **history错误消息累积致session不可恢复** (2026-05-01): API错误(400/500等)产生的`!!!Error`消息残留在history中，后续ask()携带脏history反复触发错误形成死循环。四处修改: A._openai_stream空input提前guard返回错误而非发请求; B.BaseSession.ask错误时自动调heal()清理history; C._heal_history从只pop尾部改为**全量扫描过滤**(原实现只while pop末尾，中间夹杂的错误消息无法清除); D.MixinSession fallback全失败时heal所有子session。验证: 5项单元测试+3项端到端实测(正常ask/注入错误恢复/heal直接清理)全PASS。教训: **history清理必须全量扫描不能只处理尾部**；错误恢复机制应在ask层自动触发而非依赖外部调用
+
+## [GitHub] <!-- updated: 2026-04-25 -->
+- 用户: PolarExplorer, Token: mykey.py GITHUB_TOKEN (ghp_开头, scopes: repo+read:org)
+- git credential: ~/.git-credentials (store模式), git user: ZhuanZ
+- API认证: `Authorization: token {GITHUB_TOKEN}` → api.github.com (含/search/code等需认证接口)
+- 默认存放: `GA_ROOT/issues/` (按日期+问题命名, 如 2026-04-25_claude_api_400_no_tool_output.md)
+
+## [Git代理] <!-- updated: 2026-04-25 -->
+- 环境: 无法直连GitHub，需梯子代理
+- 代理配置: `git config --global http.proxy http://127.0.0.1:8902` + `https.proxy`同
+- 清除: `git config --global --unset http.proxy && git config --global --unset https.proxy`
+- 验证: fetch/pull成功确认代理生效
+
+## [GA架构演进参考] <!-- updated: 2026-04-25 -->
+- 来源: "Agentic Reasoning for LLMs" (UIUC+Meta+Amazon+DeepMind+Yale, 2026, 135页综述)
+- GA现状定位: L0-L4分层记忆属structured memory，超过论文引用的多数系统(MemGPT/Voyager仅2层); reflect机制=reflective feedback loop; 用户偏好建模领先于学术open problem
+- 可强化方向: ①Validator-driven feedback(用工具执行结果做二元信号驱动系统化重试，超越当前规则式失败升级) ②Self-evolving tool-use(已落地→pattern_registry.py: 蒸馏检测重复模式→注册追踪→≥3次成熟提议固化为脚本/SOP)
+- 来源2: "Toward Efficient Agents" (上海AI Lab+复旦+清华, 2025, 52页效率综述)
+- 效率可强化: ③Hybrid Memory Management(已落地→mem_manager+mem_lifecycle: tier-specific trigger-driven, STM溢出→Heat Score淘汰→LTM摘要, ADD/UPDATE/DELETE/NOOP自动化) ④Budget-Aware Planning(已落地→budget_tracker.py: 任务分级+token累加+60%压缩/80%降级/95%暂停, monkey-patch llmcore._record_usage) ⑤两阶段Tool Selection(已落地→tool_selector.py: skill_search embedding粗筛→LLM精选)
+
+## [Bot守护基础设施] <!-- updated: 2026-04-30 -->
+- 飞书: fsapp_daemon.pyw → frontends/fsapp.py | 计划任务GA_FeishuBot(SYSTEM/ONSTART/延迟30s)
+- 命令转发: handle_command else分支→agent.put_task(cmd, source="feishu")，未知/命令不再拦截，skill触发词(/neat等)由agent侧接管
+- 微信: wxapp_daemon.pyw → frontends/wechatapp.py | 计划任务GA_WeChatBot(当前用户/ONLOGON/延迟30s)
+- 微信token持久化: ~/.wxbot/token.json (重启后自动重连无需扫码)
+- schtasks提权: 写独立ps1文件→Start-Process -Verb RunAs -Wait执行; ps1中禁$ErrorActionPreference="Stop"(schtasks /Delete找不到旧任务会触发catch); 用户名含括号/中文时bat自提权路径传递会失败
+
+## [防变砖机制] <!-- updated: 2026-05-02 -->
+- **写入拦截**: script_guard.py (GA根目录) — memory/*.py写入前ast.parse+py_compile双重语法检查，不合格拒绝写入；排除.template.py
+- **ga.py Hook**: file_patch + do_file_write 两处调用validate_python_write拦截
+- **外部看门狗**: ga_watchdog.py (GA根目录) — 每60s检活GA进程，连续3次重启失败→精准恢复→全量恢复→再重启
+- **看门狗检活**: 端口18513优先(socket connect)，进程名fallback(launch.pyw/stapp.py)
+- **看门狗健康检查**: script_guard_check + script_health_check(集成self_test --json)，返回失败模块列表供精准恢复
+- **精准恢复**: git_recover_memory(failed_files=[...]) 只恢复具体坏文件，失败自动降级全量 git checkout -- memory/
+- **防重复实例**: launch.pyw启动时bind端口18513，已占用则退出（防watchdog反复拉起多实例）
+- **memory self_test**: 6个核心模块(adb_ui/keychain/ljqCtrl/ocr_utils/procmem_scanner/ui_detect)各含self_test()，script_health_check.py --json 可批量执行
+- **看门狗计划任务**: schtasks GA_Watchdog (ONLOGON, pythonw ga_watchdog.py后台)；`--once`单次健康检查模式
+- **memory自动备份**: sche_tasks/memory_autocommit.json — 每日23:30 git commit memory/（只commit不push, max_delay_hours=4）
+
+## [多Bot资源锁] <!-- updated: 2026-04-26 -->
+- 模块: ga_resource_lock.py (Windows Named Mutex跨进程互斥, 120s超时, 崩溃自动恢复)
+- 浏览器锁(GA_BROWSER_LOCK): ga.py web_scan/web_execute_js 自动持锁
+- 键鼠锁(GA_HID_LOCK): ljqCtrl.py Click/Press 自动持锁
+- 效果: 微信/飞书/主窗口多Bot并发时，浏览器和键鼠操作自动排队，无需用户预判
+
+## [脚本化CLI工具集] <!-- updated: 2026-05-02 -->
+- 目录: scripts/ (14文件, 统一argparse CLI)
+- 基础: __init__.py, _common.py(GA_ROOT/find_free_port/kill_proc等公共函数)
+- 端口诊断: ga_ports.py (list/check/kill/tree) — 端口占用巡检与清理
+- 服务管理: ga_service.py (restart/status/doctor) — GA服务重启与健康检查
+- API诊断: ga_api.py (ping/roundtrip) — API端点连通性与延迟测试
+- History: ga_history.py (lint/heal) — history文件合法性检查与修复
+- 调试: ga_debug.py (snapshot/env) — 快速诊断快照(端口+进程+API+GPU)
+- Git: ga_git.py (st/sync/log) — Git状态/同步/日志
+- 记忆搜索: ga_memsearch.py (search) — memory/全文检索
+- 任务初始化: ga_init.py (task) — 新任务工作区初始化
+- OCR: ga_ocr.py — 本地OCR识别
+- 文档: ga_doc.py — 文档读取/创建(PDF/docx/xlsx)
+- 浏览器: ga_web.py — 浏览器操作(navigate/extract/screenshot/frames)
+- ADB: ga_adb.py — 手机ADB操作(status/screenshot/tap/text)
+- 使用: python scripts/ga_xxx.py subcommand [args]
+
+## [约束引擎接入] <!-- updated: 2026-04-28 -->
+- 引擎模块: ga_constraint_engine.py (evaluate_all/evaluate_constraint/load_constraints)
+- DSL文件: GA_ROOT/assets/constraints_dsl.json (70条约束定义)
+- 接入点: ga.py turn_end_callback (L524-551)，Monitor模式
+- 调用流程: load_constraints(path)→evaluate_all(constraints, ctx)→过滤status=fail→注入next_prompt警告
+- ctx字段: history/response_text/tool_calls/scripts/user_message
+- 模式: Monitor（违规警告不阻断）；待实现: Enforce（违规阻断）
+- 异常安全: try/except包裹，引擎异常不影响主流程
+- 坑点: load_constraints必须传path参数（__file__相对构建），不能无参调用
+
+## [审计与Dashboard] <!-- updated: 2026-04-29 -->
+- 模块: ga_audit.py (agentmain.__init__自动install, 每turn记录审计事件到audit_log.json)
+- Dashboard: temp/dashboard/dashboard.html (ga_audit.install自动启动静态服务8765, 控制端口8766；隔离巡检先查端口归属，勿复用已被真实Bot占用的端口)
+- 功能: task_id隔离、turn日志、token统计、constraint_checks、/api/stop远程停止；stop隔离测试用动态空闲端口并核对runtime_ports
+- 约束自动检测: assets/constraints_registry.json 的 detection.type 驱动 _run_checks；已验证类型含 summary_check、sensitive_access、memory_write_check、claim_without_evidence、code_pattern、required_tool、context_check 等
+- 坑点: registry 中 detection 可为字符串 "engine"（engine-only规则），_run_checks需跳过非dict detection；tool_calls也可能混入raw string，审计提取前需normalize，否则会导致Dashboard日志写入中断
+- 快照同步: constraints_snapshot.json 含 registry+DSL 双源，124项(84 Auto / 40 Manual)
+- 前端约束面板: autoPool/manualPool 双分组，各显示违规/通过/未触发计数；_ensure_dashboard_assets自动同步assets→temp/dashboard（坑：手动改assets/audit_dashboard.html后需copy到temp/dashboard/dashboard.html或重启服务才生效）
+- 报告导出(搁置): ga_audit_report.py 已创建(collect_report_data+异步导出框架)，计划接gpt-image-2生成视觉摘要卡片，参考图风格为粉色系卡片化信息图，待用户需要时启用
+
+## [问题修复: tool_use/tool_result orphan 400] <!-- fixed: 2026-05-01 -->
+- 问题: trim裁剪history时可能删除assistant(tool_use)但保留user(tool_result)，导致API 400 invalid_request_error
+- 修复: llmcore.py _cleanup_history_tool_boundaries 增加反向orphan检测——遍历user msg的tool_result content blocks，若前一条assistant无匹配tool_use_id则移除该block；纯orphan的user msg替换为占位符
+- 附带改动: L892-894空content兜底(防trim产生空content block)、L504-516 400错误debug dump(记录请求体便于诊断)
+- 验证: 4项单元测试PASS + 端到端API调用无400
+
+## [问题修复: trim边界3bug] <!-- fixed: 2026-05-01 -->
+- **Bug1 leading-role违规**: _cleanup_history_tool_boundaries移除orphan block后，history可能以assistant开头（违反user-first交替规则）。修复: cleanup末尾检测首条非system消息，若为assistant则移除直到首条为user
+- **Bug2 compact后连续user碰撞**: _compact_history_prefix将前缀压缩为单条user摘要，若keep_recent部分首条也是user，产生连续同角色消息。修复: compact末尾检测摘要msg与keep_recent首条是否同为user，若是则合并content
+- **Bug3 trailing assistant残留**: trim_messages_history裁剪后末尾可能残留无tool_result的assistant(tool_use)消息，下轮拼接新user时API报错。修复: trim末尾while循环检测最后一条是否为含tool_use的assistant，若是则pop
+- 通用教训: **history裁剪/压缩操作后必须做三项边界校验——首条角色合法性、相邻角色不重复、末尾消息完整性**
+- 验证: 4项针对性测试PASS
