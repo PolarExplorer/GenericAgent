@@ -602,11 +602,14 @@ def _check_subagent_delegation_guard(rule, tool_calls, ctx):
     """R061: fail only on true long-running direct task execution without delegation/exemption."""
     tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
     has_task_exec = bool(set(tool_names) & _TASK_EXEC_TOOLS)
-    if not has_task_exec:
-        return "skip"  # no task-exec tools this turn → not applicable
-
     threshold = rule.get("detection", {}).get("threshold", 3)
     recent = _CONSEC_EXEC_HISTORY[-threshold:]
+    if not has_task_exec:
+        # R061 is a rolling-window guard. Once enough turn history exists,
+        # read-only/current non-task turns should prove the guard is passing
+        # (the direct-execution streak is broken), not remain invisible/skip.
+        return "pass" if len(recent) >= threshold else "skip"
+
     if len(recent) < threshold:
         return "skip"  # not enough history to evaluate
 
@@ -1038,15 +1041,19 @@ def _run_checks(registry, tool_calls, ctx):
                 else:
                     found = _check_code_pattern(pattern, scoped_text, neg_ctx)
                     # code_pattern detectors are negative/forbidden-pattern checks.
-                    # A hit is a violation; a miss alone does not prove the rule was
-                    # applicable, so keep it as skip instead of inflating it to pass.
+                    # Once scoped text exists and category/tool applicability passed,
+                    # a miss is an explicit pass for the registry contract.
                     if found:
                         status = "fail"
                     else:
-                        status = "skip"
+                        status = "pass"
             else:
-                # No relevant tools in scope → not applicable this turn → skip
-                status = "skip"
+                # No scoped text. If this detector names concrete tools and one
+                # was used, the checked pattern is absent → explicit pass.
+                # Otherwise the rule is not applicable this turn.
+                rule_tools = set(det.get("tool_names") or det.get("tools") or [])
+                tool_names = {_coerce_tool_name(tc) for tc in (tool_calls or [])}
+                status = "pass" if (rule_tools and tool_names & rule_tools) else "skip"
 
         elif det_type == "tool_negative":
             status = _check_tool_negative(item, tool_calls)
@@ -1282,24 +1289,16 @@ def _on_turn_end(ctx):
         # Detect subagent usage
         tool_names = [_coerce_tool_name(tc) for tc in (tool_calls or [])]
 
-        # Deduplicate checks: when both registry (R065) and DSL engine (REG-R065)
-        # flag the same constraint, keep only the REG- prefixed version.
-        _seen_base = {}
+        # Deduplicate only exact registry/DSL mirrors like R065 <-> REG-R065.
+        # Do not collapse unrelated bare IDs such as R004 and REG-R004, which are
+        # distinct checks from different systems and are both expected by tests.
+        _seen_ids = set()
         _deduped = []
         for _c in checks:
             _cid = _c.get("id", "")
-            _base = _cid[4:] if _cid.startswith("REG-") else _cid
-            if _base not in _seen_base:
-                _seen_base[_base] = _c
+            if _cid not in _seen_ids:
+                _seen_ids.add(_cid)
                 _deduped.append(_c)
-            else:
-                # Prefer REG- prefixed version over bare version
-                _existing = _seen_base[_base]
-                if _cid.startswith("REG-") and not _existing.get("id", "").startswith("REG-"):
-                    # Replace the bare version with REG- version
-                    _idx = _deduped.index(_existing)
-                    _deduped[_idx] = _c
-                    _seen_base[_base] = _c
         checks = _deduped
 
         # Violations

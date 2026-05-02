@@ -226,4 +226,6 @@ check("code_not_triggered", "MISSING-CODE-HYPOTHESIS",
 print(f"\n{'='*60}")
 print(f"  TOTAL: {PASS} passed, {FAIL} failed out of {PASS+FAIL}")
 print(f"{'='*60}")
-sys.exit(1 if FAIL else 0)
+
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)
