@@ -708,7 +708,7 @@ def _to_responses_input(messages):
             explicit_cid = msg.get("tool_call_id")
             cid = explicit_cid or (pending.pop(0) if pending else "")
             if cid and cid in seen_calls:
-                result.append({"type": "function_call_output", "call_id": cid, "output": msg.get("content", "")})
+                result.append({"type": "function_call_output", "call_id": cid, "output": msg.get("content", "") or "(completed)"})
             else:
                 orphan_tool_outputs += 1
                 content = msg.get("content", "")
@@ -836,7 +836,7 @@ def _msgs_claude2oai(messages):
                         if text_parts:
                             result.append({"role": "user", "content": text_parts})
                             text_parts = []
-                        result.append({"role": "tool", "tool_call_id": tid, "content": tr})
+                        result.append({"role": "tool", "tool_call_id": tid, "content": tr or "(completed)"})
                     else:
                         orphan_tool_results += 1
                         text_parts.append({"type": "text", "text": f"[orphan tool_result converted to text; tool_use_id={tid or 'missing'}]\n{tr}"})
@@ -1506,10 +1506,10 @@ class NativeToolClient:
         for tr in tool_results:
             tool_use_id, content = tr.get("tool_use_id", ""), tr.get("content", "")
             tr_id_set.add(tool_use_id)
-            if tool_use_id: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": tr.get("content", "")})
+            if tool_use_id: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": tr.get("content", "") or "(completed)"})
             else: combined_content = [{"type": "text", "text": f'<tool_result>{content}</tool_result>'}] + combined_content
         for tid in self._pending_tool_ids:
-            if tid not in tr_id_set: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tid, "content": ""})
+            if tid not in tr_id_set: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tid, "content": "(completed)"})
         self._pending_tool_ids = []
         merged = {"role": "user", "content": tool_result_blocks + combined_content}
         _write_llm_log('Prompt', json.dumps(merged, ensure_ascii=False, indent=2))

@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from agent_loop import BaseHandler, StepOutcome, json_default
 from memory.mem_manager import compress_working_memory
 from ga_dispatch_gate import DispatchGate
+from ga_coding_gate import CodingGate
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop_signal=[]):
@@ -279,12 +280,21 @@ class GenericAgentHandler(BaseHandler):
         self.code_stop_signal = []
         self._done_hooks = []
         self._dispatch_gate = DispatchGate()
+        self._coding_gate = CodingGate(mode="audit")
 
     def _check_dispatch_gate(self, tool_name, args):
         """Check dispatch gate; returns StepOutcome if blocked, else None."""
         allowed, reason = self._dispatch_gate.check_tool(tool_name, args)
         if not allowed:
             return StepOutcome(reason, next_prompt="\n" + reason + "\n")
+        return None
+
+    def _check_coding_gate(self, tool_name, args, response):
+        """Check coding gate; returns StepOutcome if blocked, else None. WARN handled in turn_end."""
+        assistant_text = getattr(response, 'content', '') or ''
+        decision, message = self._coding_gate.check_tool(tool_name, args, assistant_text)
+        if decision == "BLOCK":
+            return StepOutcome({"status": "error", "msg": message}, next_prompt="\n" + message + "\n")
         return None
 
     def _get_abs_path(self, path):
@@ -300,6 +310,8 @@ class GenericAgentHandler(BaseHandler):
         '''执行代码片段，有长度限制，不允许代码中放大量数据，如有需要应当通过文件读取进行。'''
         _blocked = self._check_dispatch_gate('code_run', args)
         if _blocked: return _blocked
+        _cg = self._check_coding_gate('code_run', args, response)
+        if _cg: return _cg
         code_type = args.get("type", "python")
         code = args.get("code") or args.get("script")
         if not code:
@@ -377,6 +389,8 @@ class GenericAgentHandler(BaseHandler):
     def do_file_patch(self, args, response):
         _blocked = self._check_dispatch_gate('file_patch', args)
         if _blocked: return _blocked
+        _cg = self._check_coding_gate('file_patch', args, response)
+        if _cg: return _cg
         path = self._get_abs_path(args.get("path", ""))
         old_content = args.get("old_content", "")
         new_content = args.get("new_content", "")
@@ -394,6 +408,8 @@ class GenericAgentHandler(BaseHandler):
         需要将要写入的内容放在<file_content>标签内，或者放在代码块中'''
         _blocked = self._check_dispatch_gate('file_write', args)
         if _blocked: return _blocked
+        _cg = self._check_coding_gate('file_write', args, response)
+        if _cg: return _cg
         path = self._get_abs_path(args.get("path", ""))
         mode = args.get("mode", "overwrite")  # overwrite/append/prepend
         action_str = {"prepend": "Prepending to", "append": "Appending to"}.get(mode, "Overwriting")
@@ -606,6 +622,15 @@ class GenericAgentHandler(BaseHandler):
         except Exception:
             pass
         # === END Dispatch Gate ===
+        # === Coding Gate (turn-end audit) ===
+        try:
+            _cg_tc = [{'tool_name': tc['tool_name'], 'args': tc.get('args', {})} for tc in tool_calls]
+            _cg_decision, _cg_prompt = self._coding_gate.on_turn_end(_cg_tc, response.content)
+            if _cg_prompt:
+                next_prompt += _cg_prompt
+        except Exception:
+            pass
+        # === END Coding Gate ===
         _c = re.sub(r'```.*?```|<thinking>.*?</thinking>', '', response.content, flags=re.DOTALL)
         rsumm = re.search(r"<summary>(.*?)</summary>", _c, re.DOTALL)
         if rsumm: summary = rsumm.group(1).strip()
@@ -617,6 +642,30 @@ class GenericAgentHandler(BaseHandler):
             next_prompt += "\n[DANGER] 你遗漏了<summary>，必须按协议一直在每次回复中用<summary>中输出极简单行摘要！" 
         summary = smart_format(summary, max_str_len=100)
         self.history_info.append(f'[Agent] {summary}')
+        # === Session Event Logger (turn_end auto-record) ===
+        try:
+            from memory.session_event_log import log_event as _sel_log
+            _tool_names = [tc.get('tool_name', '') for tc in tool_calls]
+            _sid = os.path.basename(getattr(self.parent, 'task_dir', '')) or 'unknown'
+            _sel_log(module='ga', event_type='turn_end', severity='info',
+                     data={'turn': turn, 'summary': summary, 'tools': _tool_names,
+                           'exit_reason': exit_reason},
+                     session_id=_sid)
+        except Exception:
+            pass
+        # === END Session Event Logger ===
+        # === Pattern Registry Scan (on long-term memory update) ===
+        try:
+            _tn_b = [tc.get('tool_name', '') for tc in tool_calls]
+            if 'start_long_term_update' in _tn_b:
+                from memory.pattern_registry import get_mature_patterns as _get_mp
+                _mature = _get_mp()
+                if _mature:
+                    _plist = ', '.join(p.get('pattern_id', '?') for p in _mature[:5])
+                    next_prompt += f"\n\n[Pattern Registry] {len(_mature)}个成熟pattern待固化: {_plist}。考虑用skill_solidifier处理。"
+        except Exception:
+            pass
+        # === END Pattern Registry Scan ===
         if turn % 65 == 0 and 'plan' not in str(self.working.get('related_sop')):
             next_prompt += f"\n\n[DANGER] 已连续执行第 {turn} 轮。你必须总结情况进行ask_user，不允许继续重试。"
         elif turn % 7 == 0:

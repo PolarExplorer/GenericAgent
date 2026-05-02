@@ -678,7 +678,10 @@
       "name": "执行类子任务必须走 subagent",
       "category": "分发纪律",
       "source": "RULES #14",
-      "detection": "engine",
+      "detection": {
+        "type": "consecutive_execution_check",
+        "threshold": 3
+      },
       "active": true
     },
     {
@@ -854,7 +857,7 @@
       "source": "RULES #8",
       "detection": {
         "type": "code_pattern",
-        "scope": "exec_only",
+        "scope": "tool_args",
         "pattern": "(?is)\\A(?=.*(?:_sop|SOP|\\.md))(?!.*(?:file_read|open\\s*\\(|Path\\s*\\(|read_text|memory[/\\\\]|\\.md)).*",
         "description": "检测提到SOP但缺文件读取动作的坏味道"
       },
@@ -1226,7 +1229,10 @@
       "priority": "high",
       "source": "RULES #14",
       "description": "连续>=3轮主Agent直接执行编码/信息收集类工具调用而未委托subagent，视为违规。",
-      "detection": "engine",
+      "detection": {
+        "type": "subagent_delegation_guard",
+        "threshold": 3
+      },
       "active": true
     },
     {
@@ -1298,6 +1304,47 @@
         "pattern": "(?s)\\A(?!.*max_delay_hours)(?=.*(?:scheduled_task|schedule_task|create_task|register_task|schtasks|add_task)).*",
         "scope": "exec_only",
         "description": "检测创建/注册定时任务时未设置 max_delay_hours"
+      },
+      "active": true
+    },
+    {
+      "id": "R067",
+      "name": "memory修改后必须验证",
+      "category": "memory_safety",
+      "priority": "high",
+      "source": "harness_engineering/CONSTITUTION",
+      "description": "对 memory/ 下文件执行 file_patch 后，同turn必须 file_read 验证改动生效且无破坏。",
+      "detection": {
+        "type": "sequence_check",
+        "trigger": "file_patch on memory/",
+        "required_follow": "file_read same file",
+        "description": "检测 file_patch memory/ 后是否跟随 file_read 验证"
+      },
+      "active": true
+    },
+    {
+      "id": "R068",
+      "name": "复杂任务必须先输出边界清单",
+      "category": "planning",
+      "priority": "medium",
+      "source": "harness_engineering/plan_sop",
+      "description": "复杂/多步/边界不清任务，实施前必须先列出：输入、输出、约束、验收标准。无边界清单禁止动手。",
+      "detection": {
+        "type": "process_gate",
+        "description": "复杂任务判定后检查是否有边界清单输出"
+      },
+      "active": true
+    },
+    {
+      "id": "R069",
+      "name": "多方案必须先收敛再实施",
+      "category": "planning",
+      "priority": "medium",
+      "source": "harness_engineering/plan_sop",
+      "description": "存在2+可行方案时，必须先比较优劣并收敛到单一方案，禁止边做边决定。",
+      "detection": {
+        "type": "process_gate",
+        "description": "检测到多方案讨论后是否有明确收敛结论"
       },
       "active": true
     }

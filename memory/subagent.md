@@ -60,6 +60,23 @@
     "pdf": "/absolute/path/to/paper.pdf",
     "report": "/absolute/path/to/paper_report.md"
   },
-  "dependencies": ["paper_info.txt必须存在"]
+  "dependencies": ["paper_info.txt必须存在"],
+  "output_contract": {
+    "required_files": ["output.txt"],
+    "success_criteria": "具体的完成判定条件",
+    "validation": "主agent验证方式(file_read/运行/截图)"
+  }
 }
 ```
+
+## Subagent 输出合同 (Output Contract)
+**原则**：主agent委托时必须在context.json中定义`output_contract`，subagent按合同交付
+**字段说明**：
+- `required_files`：subagent必须生成的文件列表
+- `success_criteria`：具体可验证的完成条件（非模糊描述）
+- `validation`：主agent用什么方式验收（file_read / 运行脚本 / 截图比对）
+
+**验收流程**：
+1. 主agent读取`output_files`中声明的文件
+2. 按`success_criteria`判定是否通过
+3. 未通过→带具体反馈重新委托，禁止主agent自己补完

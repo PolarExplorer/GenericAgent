@@ -20,12 +20,33 @@ LOG_FILE = os.path.join(TEMP_DIR, "watchdog.log")
 LAUNCH_SCRIPT = os.path.join(BASE_DIR, "launch.pyw")
 MEMORY_DIR = os.path.join(BASE_DIR, "memory")
 GA_PORT = 18513              # launch.pyw DEFAULT_PORT
+RESTART_COUNT_FILE = os.path.join(TEMP_DIR, "watchdog_restart_count.txt")
 
 CHECK_INTERVAL = 30        # 秒，健康检查间隔
 STARTUP_GRACE = 45         # 秒，重启后等待启动的宽限期
 MAX_RETRIES = 3             # 连续失败几次后触发 git 恢复
 MAX_TOTAL_RESTARTS = 5      # 单次 daemon 生命周期内最多重启次数，防止无限创建窗口
 CREATE_NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
+
+# ── 持久化重启计数（跨 watchdog 实例生效）──────────────────
+def _load_restart_count():
+    try:
+        with open(RESTART_COUNT_FILE, "r") as f:
+            return int(f.read().strip())
+    except Exception:
+        return 0
+
+def _save_restart_count(count):
+    try:
+        os.makedirs(TEMP_DIR, exist_ok=True)
+        with open(RESTART_COUNT_FILE, "w") as f:
+            f.write(str(count))
+    except Exception:
+        pass
+
+def _reset_restart_count():
+    """GA 正常运行一段时间后可重置（由外部或手动调用）"""
+    _save_restart_count(0)
 
 # ── 日志 ──────────────────────────────────────────────────
 def log(msg, level="INFO"):
@@ -83,13 +104,16 @@ def _get_python_cmdlines_win():
 
     return ""
 
-def _is_port_open(port=GA_PORT, host="127.0.0.1", timeout=2):
-    """TCP connect 检测本地端口是否在监听"""
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except (ConnectionRefusedError, OSError, socket.timeout):
-        return False
+def _is_port_open(port=GA_PORT, host="127.0.0.1", timeout=2, retries=2):
+    """TCP connect 检测本地端口是否在监听（带重试，防间歇性误判）"""
+    for attempt in range(retries):
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except (ConnectionRefusedError, OSError, socket.timeout):
+            if attempt < retries - 1:
+                time.sleep(1)
+    return False
 
 def _is_process_alive():
     """Fallback: 通过进程命令行关键词检测 GA"""
@@ -119,7 +143,13 @@ def is_ga_alive():
 
 # ── 恢复操作 ─────────────────────────────────────────────
 def restart_ga():
-    """通过 launch.pyw 重启 GA"""
+    """通过 launch.pyw 重启 GA（带进程去重）"""
+    # ── 去重：如果 launch.pyw 或 streamlit 进程已存在，不再拉新的 ──
+    if _is_process_alive():
+        log("launch.pyw/streamlit process already running — skipping restart to avoid duplicate windows", "WARN")
+        # 进程在但端口不通，可能正在启动中，等一轮再判断
+        return False
+
     log("Attempting to restart GA via launch.pyw ...")
     try:
         if os.name == 'nt':
@@ -275,7 +305,7 @@ def run_daemon():
     log("========================================")
     
     consecutive_failures = 0
-    total_restarts = 0
+    total_restarts = _load_restart_count()
     check_count = 0
     
     while True:
@@ -299,7 +329,7 @@ def run_daemon():
             
             # 安全阀：总重启次数超限 → 停止重启，仅监控
             if total_restarts >= MAX_TOTAL_RESTARTS:
-                if consecutive_failures == MAX_TOTAL_RESTARTS:  # 只打一次
+                if total_restarts == MAX_TOTAL_RESTARTS:  # 只在刚达到时打一次
                     log(f"Total restart limit ({MAX_TOTAL_RESTARTS}) reached. "
                         f"Watchdog will continue monitoring but NOT restart GA. "
                         f"Manual intervention required.", "ERROR")
@@ -309,6 +339,7 @@ def run_daemon():
             if consecutive_failures < MAX_RETRIES:
                 # 普通重启
                 total_restarts += 1
+                _save_restart_count(total_restarts)
                 success = restart_ga()
                 if success:
                     consecutive_failures = 0
@@ -329,6 +360,7 @@ def run_daemon():
                     if recovered:
                         log("Memory restored via git. Attempting restart...")
                         total_restarts += 1
+                        _save_restart_count(total_restarts)
                         success = restart_ga()
                         if success:
                             consecutive_failures = 0
@@ -342,6 +374,7 @@ def run_daemon():
                     # memory 没问题但 GA 还是起不来 → 可能是其他原因
                     log("ScriptGuard passed but GA still down. Trying plain restart...", "WARN")
                     total_restarts += 1
+                    _save_restart_count(total_restarts)
                     success = restart_ga()
                     if success:
                         consecutive_failures = 0

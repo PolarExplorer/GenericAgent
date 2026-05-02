@@ -65,6 +65,25 @@
       }
     },
     {
+      "id": "MISSING-VISION-ENUM-WINDOW",
+      "name": "视觉/截图前必须先枚举窗口",
+      "source": "memory/vision_sop.md / global_mem_insight",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "scope": "response",
+          "pattern": "(?:截图|截屏|screenshot|vision|视觉|OCR|识别屏幕|看(?:一下|看)屏幕)",
+          "tool_names": [
+            "code_run"
+          ]
+        },
+        "precondition": {
+          "lookback": 2,
+          "response_pattern": "(?:EnumWindows|枚举窗口|窗口枚举|先枚举窗口|确认目标窗口|窗口句柄)"
+        }
+      }
+    },
+    {
       "id": "MISSING-LJQ-ACTIVATE",
       "name": "键鼠/物理模拟前必须激活窗口",
       "source": "memory/ljqCtrl_sop.md:3,41",

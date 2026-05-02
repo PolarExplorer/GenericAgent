@@ -126,6 +126,21 @@
 - 异常安全: try/except包裹，引擎异常不影响主流程
 - 坑点: load_constraints必须传path参数（__file__相对构建），不能无参调用
 
+## [session_event_log ga.py接入] <!-- updated: 2026-05-02 -->
+- 接入点: ga.py turn_end_callback L645-656 (summary记录后, hooks前)
+- 记录内容: module=ga, event_type=turn_end, severity=info, data={turn, summary, tools[], exit_reason}
+- session_id: self.parent.task_dir basename
+- 异常安全: try/except+pass，与约束引擎/DispatchGate/CodingGate同pattern
+- 日志文件: memory/session_events.jsonl (自动trim至1000条)
+- 回滚: 删除L645-656即可完全恢复
+
+## [pattern_registry ga.py接入] <!-- updated: 2026-05-02 -->
+- 接入点: ga.py turn_end_callback L657-668 (session_event_log后, hooks前)
+- 触发条件: 本轮tool_calls含start_long_term_update时才执行扫描(避免每轮开销)
+- 行为: get_mature_patterns()检查成熟pattern(seen≥3)，有则注入next_prompt提醒用skill_solidifier处理
+- 异常安全: try/except+pass，与A(session_event_log)同pattern
+- 回滚: 删除L657-668即可完全恢复
+
 ## [审计与Dashboard] <!-- updated: 2026-04-29 -->
 - 模块: ga_audit.py (agentmain.__init__自动install, 每turn记录审计事件到audit_log.json)
 - Dashboard: temp/dashboard/dashboard.html (ga_audit.install自动启动静态服务8765, 控制端口8766；隔离巡检先查端口归属，勿复用已被真实Bot占用的端口)
