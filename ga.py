@@ -562,14 +562,28 @@ class GenericAgentHandler(BaseHandler):
         else: result = "Memory Management SOP not found. Do not update memory."
         return StepOutcome(result, next_prompt=prompt)
 
+    def _fold_earlier(self, lines):
+        FALLBACK = '直接回答了用户问题'
+        parts, cnt, last = [], 0, ''
+        def flush():
+            if cnt:
+                if FALLBACK in last: parts.append(f'[Agent]（{cnt} turns）')
+                else: parts.append(f'{last}（{cnt} turns）')
+        for line in lines:
+            if line.startswith('[USER]'):
+                flush(); parts.append(line); cnt = 0; last = ''
+            else: cnt += 1; last = line
+        flush()
+        return "\n".join(parts[-150:])
+
     def _get_anchor_prompt(self, skip=False):
         if skip: return "\n"
-        h_str = "\n".join(self.history_info[-40:])
-        prompt = f"\n### [WORKING MEMORY]\n<history>\n{h_str}\n</history>"
+        h = self.history_info; W = 30
+        earlier = f'<earlier_context>\n{self._fold_earlier(h[:-W])}\n</earlier_context>\n' if len(h) > W else ""
+        h_str = "\n".join(h[-W:])
+        prompt = f"\n### [WORKING MEMORY]\n{earlier}<history>\n{h_str}\n</history>"
         prompt += f"\nCurrent turn: {self.current_turn}\n"
-        if self.working.get('key_info'):
-            ki = compress_working_memory(self.working['key_info'])
-            prompt += f"\n<key_info>{ki}</key_info>"
+        if self.working.get('key_info'): prompt += f"\n<key_info>{self.working.get('key_info')}</key_info>"
         if self.working.get('related_sop'): prompt += f"\n有不清晰的地方请再次读取{self.working.get('related_sop')}"
         if getattr(self.parent, 'verbose', False):
             try: print(prompt)
@@ -674,9 +688,14 @@ class GenericAgentHandler(BaseHandler):
             next_prompt += f"\n\n[DANGER] 已连续执行第 {turn} 轮。禁止无效重试。若无有效进展，必须切换策略：1. 探测物理边界 2. 请求用户协助。如有需要，可调用 update_working_checkpoint 保存关键上下文。"
         elif turn % 10 == 0: next_prompt += get_global_memory()
 
-        if (_plan := self._in_plan_mode()) and turn >= 10 and turn % 5 == 0:
+        _plan = self._in_plan_mode()
+        if _plan and turn >= 10 and turn % 5 == 0:
             next_prompt = f"[Plan Hint] 你正在计划模式。必须 file_read({_plan}) 确认当前步骤，回复开头引用：📌 当前步骤：...\n\n" + next_prompt
         if _plan and turn >= 90: next_prompt += f"\n\n[DANGER] Plan模式已运行 {turn} 轮，已达上限。必须 ask_user 汇报进度并确认是否继续。"
+
+        # === peer hint (cross-session) ===
+        peer_hint = consume_file(self.parent.task_dir, '_peer_hint')
+        if peer_hint: next_prompt += f"\n[Peer Hint] 来自其他Agent的提示：{peer_hint}\n"
 
         injkeyinfo = consume_file(self.parent.task_dir, '_keyinfo')
         injprompt = consume_file(self.parent.task_dir, '_intervene')
