@@ -661,6 +661,11 @@ def _openai_stream(sess, messages):
         responses_input = _sanitize_responses_tool_chain(_to_responses_input(messages))
         orphans = _responses_tool_chain_orphans(responses_input)
         if orphans: raise ValueError(f"Responses input still has orphan function_call_output item(s): {orphans[:3]}")
+        if not responses_input:
+            err = "!!!Error: [Guard] input is empty after conversion — skipping API call to avoid 400. Check upstream message construction."
+            print(err)
+            yield err
+            return []
         payload = {"model": model, "input": responses_input, "stream": sess.stream, 
                    "prompt_cache_key": _RESP_CACHE_KEY, "instructions": sess.system or "You are an Omnipotent Executor."}
         if sess.reasoning_effort: payload["reasoning"] = {"effort": sess.reasoning_effort}
@@ -844,6 +849,27 @@ def _msgs_claude2oai(messages):
             if text_parts: result.append({"role": "user", "content": text_parts})
         else: result.append(msg)
     if orphan_tool_results: print(f"[WARN] Converted {orphan_tool_results} orphan Claude tool_result(s) before OAI conversion.")
+    # Post-pass: detect orphan tool_calls (assistant has tool_call but no matching tool response follows)
+    answered_ids = {m["tool_call_id"] for m in result if m.get("role") == "tool" and m.get("tool_call_id")}
+    orphan_tool_calls = 0
+    for m in result:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            surviving, demoted_texts = [], []
+            for tc in m["tool_calls"]:
+                if tc.get("id") in answered_ids:
+                    surviving.append(tc)
+                else:
+                    orphan_tool_calls += 1
+                    fn = tc.get("function", {})
+                    demoted_texts.append(f'[orphan tool_call demoted to text; id={tc.get("id","?")} name={fn.get("name","?")}] args={fn.get("arguments","{}")}')
+            if demoted_texts:
+                m["tool_calls"] = surviving or None
+                if not surviving: del m["tool_calls"]
+                existing = m.get("content") or []
+                if isinstance(existing, str): existing = [{"type": "text", "text": existing}] if existing else []
+                existing.extend({"type": "text", "text": t} for t in demoted_texts)
+                m["content"] = existing or "(empty)"
+    if orphan_tool_calls: print(f"[WARN] Demoted {orphan_tool_calls} orphan OAI tool_call(s) to text in _msgs_claude2oai.")
     return result
 
 
@@ -888,6 +914,48 @@ class BaseSession:
             effort = {'low': 'low', 'medium': 'medium', 'high': 'high', 'xhigh': 'max'}.get(self.reasoning_effort)
             if effort: payload["output_config"] = {"effort": effort}
             else: print(f"[WARN] reasoning_effort {self.reasoning_effort!r} is unsupported for Claude output_config.effort, ignored.")
+    def _heal_history(self):
+        """Remove ALL !!!Error messages (and orphaned user messages whose reply
+        was an error) from history so the session can recover without a restart.
+        Called automatically when repeated errors are detected, and can also be
+        invoked manually via session.heal()."""
+        with self.lock:
+            def _is_error(msg):
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    text_parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                    content = "\n".join(text_parts)
+                return isinstance(content, str) and content.startswith("!!!Error:")
+
+            # Pass 1: mark error indices and the user msg immediately before each error
+            remove = set()
+            for i, msg in enumerate(self.history):
+                if _is_error(msg):
+                    remove.add(i)
+                    # If the previous message is a user msg, it's dangling (its reply was the error)
+                    if i > 0 and self.history[i - 1].get("role") == "user":
+                        remove.add(i - 1)
+
+            # Pass 2: also strip trailing dangling user msg (no reply follows)
+            while self.history:
+                last_idx = len(self.history) - 1
+                if last_idx in remove:
+                    break  # already marked
+                if self.history[last_idx].get("role") == "user":
+                    remove.add(last_idx)
+                else:
+                    break
+
+            if not remove:
+                return 0
+
+            self.history = [msg for i, msg in enumerate(self.history) if i not in remove]
+            changed = len(remove)
+            print(f"[HEAL] Removed {changed} error/dangling message(s) from session history.")
+            return changed
+    def heal(self):
+        """Public API: heal a poisoned session by stripping error messages."""
+        return self._heal_history()
     def ask(self, prompt):
         def _ask_gen():
             with self.lock:
@@ -908,6 +976,11 @@ class BaseSession:
             # content; otherwise one interrupted stream can poison all later
             # requests in the same session.
             if content.startswith("!!!Error:"):
+                # Auto-heal: also remove the user message we just appended for
+                # this failed turn, so the next ask() starts from a clean state
+                # instead of carrying a dangling user msg that triggers 400 loops.
+                with self.lock:
+                    self._heal_history()
                 pass
             else:
                 for marker in ("\n\n[!!! 流异常中断", "\n\n[!!! Response truncated:"):
@@ -1379,6 +1452,10 @@ class MixinSession:
                 yield last_chunk
                 self._model_trace['actual'] = getattr(self._sessions[idx], 'name', f's{idx}')
                 self._model_trace['fallback_count'] = attempt + 1
+                # D: heal all sessions to prevent error pollution persisting across calls
+                for s in self._sessions:
+                    if hasattr(s, '_heal_history'):
+                        s._heal_history()
                 return return_val
             nxt = (base + attempt + 1) % n
             try:

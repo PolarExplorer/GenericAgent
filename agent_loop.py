@@ -91,7 +91,11 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema, 
                 if verbose: yield '`````\n'
             except StopIteration as e: outcome = e.value
             
-            if outcome.should_exit: 
+            if outcome.should_exit:
+                # Append tool_result before break so history stays paired (tool_use ↔ tool_result)
+                if outcome.data is not None and tool_name != 'no_tool':
+                    datastr = json.dumps(outcome.data, ensure_ascii=False, default=json_default) if type(outcome.data) in [dict, list] else str(outcome.data)
+                    tool_results.append({'tool_use_id': tid, 'content': datastr})
                 exit_reason = {'result': 'EXITED', 'data': outcome.data}; break
             if not outcome.next_prompt: 
                 exit_reason = {'result': 'CURRENT_TASK_DONE', 'data': outcome.data}; break
