@@ -139,6 +139,13 @@ class GeneraticAgent:
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             
+            # T0 Pre-routing: lightweight DeepSeek classification → model switch
+            try:
+                import ga_pre_router
+                ga_pre_router.pre_route(self, raw_query, images=images, source=source)
+            except Exception as e:
+                print(f'[PreRouter] fatal: {e}')
+            
             sys_prompt = get_system_prompt() + getattr(self.llmclient.backend, 'extra_sys_prompt', '')
             handler = GenericAgentHandler(self, self.history, os.path.join(script_dir, 'temp'))
             if self.handler and 'key_info' in self.handler.working: 

@@ -185,6 +185,15 @@ class DispatchGate:
             # Read-only / planning turn - don't increment, but don't reset either
             return self.level, ""
 
+        # Pre-router muscle bypass: if pre_router already switched to a muscle
+        # model for this user message, the "brain" isn't doing exec work — skip.
+        try:
+            from ga_pre_router import get_last_category, MUSCLE_CATEGORIES
+            if get_last_category() in MUSCLE_CATEGORIES:
+                return self.level, ""
+        except Exception:
+            pass
+
         # P1: Whitelisted turn patterns bypass gate entirely (no increment)
         if self._is_whitelisted(tool_calls, response_text):
             return self.level, ""
