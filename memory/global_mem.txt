@@ -100,6 +100,7 @@
 
 ## [脚本化CLI工具集] <!-- updated: 2026-05-02 -->
 - 目录: scripts/ (15文件, 统一argparse CLI)
+- 统一入口: `ga <tool> [子命令] [参数]` (ga.cmd → scripts/ga_cli.py dispatcher)
 - 基础: __init__.py, _common.py(GA_ROOT/find_free_port/kill_proc等公共函数)
 - 端口诊断: ga_ports.py (list/check/kill/tree) — 端口占用巡检与清理
 - 服务管理: ga_service.py (restart/status TARGET/doctor) — GA服务重启与健康检查
