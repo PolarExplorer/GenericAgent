@@ -106,6 +106,26 @@ def scan_memory(pid, pattern, context_size=256, mode='auto', llm_mode=False):
     k32.CloseHandle(h_proc)
     return results
 
+
+def self_test():
+    """Offline smoke test: rule building and context formatting only; never opens a process."""
+    assert is_hex_pattern("41 42 ?? 44")
+    assert is_hex_pattern("41424344")
+    assert not is_hex_pattern("token")
+
+    text_rules = build_rules("needle", mode="text")
+    assert text_rules.match(data=b"prefix needle suffix")
+
+    hex_rules = build_rules("41 42 ?? 44", mode="hex")
+    assert hex_rules.match(data=b"xxABCDyy")
+
+    ctx = format_llm_context(b"0123456789abcdef", offset=4, base_addr=0x1000, length=3)
+    assert ctx["address"] == "0x1004"
+    assert ctx["offset"] == "0x4"
+    assert ctx["hit_pos"] == 3
+    assert "3456789abcdef" in ctx["ascii"]
+    return True
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("pid", type=int)

@@ -12,7 +12,11 @@ ljqCtrl Quick Reference:
 
 import os, sys, time, random, math, win32api, win32con, ctypes
 import numpy as np
-from ga_resource_lock import hid_lock
+try:
+	from ga_resource_lock import hid_lock
+except ModuleNotFoundError:
+	from contextlib import nullcontext
+	hid_lock = nullcontext()
 
 dpi_scale = 1
 try:
@@ -109,6 +113,26 @@ def FindBlock(fn, wrect=None, verbose=0, threshold=0.8):
 		sscr = scr.crop([oj, oi, oj+tsw, oi+tsh])
 		sscr.show()
 	return obj, max_val > threshold
+
+
+def self_test():
+	"""Offline smoke test: constants and image-template path only; no OS input events or live capture."""
+	from PIL import Image, ImageDraw
+
+	assert dpi_scale > 0
+	assert VK_CODE['ctrl'] == 0x11
+	assert VK_CODE['a'] == 0x41
+	assert GetWRect('left2') == [0, 0, swidth // 2, sheight]
+	assert GetWRect('bottom2') == [0, sheight // 2, swidth, sheight]
+
+	scr = Image.new('RGB', (24, 24), 'white')
+	draw = ImageDraw.Draw(scr)
+	draw.rectangle([8, 9, 13, 14], fill='black')
+	block = scr.crop([8, 9, 14, 15])
+	center, found = FindBlock(block, wrect=scr, threshold=0.99)
+	assert found is True
+	assert abs(center[0] - 3) <= 1 and abs(center[1] - 3) <= 1
+	return True
 
 if __name__ == '__main__':
 	#time.sleep(3)

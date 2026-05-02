@@ -87,6 +87,30 @@ def visualize(image_path, detections, ocr_results=None, output_path=None):
         img.save(output_path)
     return img
 
+
+def self_test():
+    """Offline smoke test: visualization and OCR-disabled path only; never loads YOLO weights."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "ui.png"
+        out = Path(tmp) / "vis.png"
+        Image.new("RGB", (32, 24), "white").save(src)
+
+        dets = [{"bbox": [4, 5, 20, 18], "confidence": 0.91, "class": 0}]
+        ocr = [{"bbox": [[2, 2], [14, 2], [14, 8], [2, 8]], "text": "OK", "confidence": 0.99}]
+        img = visualize(str(src), dets, ocr, str(out))
+        assert img.size == (32, 24)
+        assert out.exists() and out.stat().st_size > 0
+
+    original_has_ocr = globals().get("HAS_OCR", False)
+    try:
+        globals()["HAS_OCR"] = False
+        assert ocr_text("unused.png") == []
+    finally:
+        globals()["HAS_OCR"] = original_has_ocr
+    return True
+
 def main():
     if len(sys.argv) < 2:
         print("用法: python ui_detect.py <图片路径> <模型路径> [输出路径]")

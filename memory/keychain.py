@@ -56,4 +56,24 @@ def list_services():
     return keys.ls()
 
 
+def self_test():
+    """No-side-effect smoke test using an isolated in-memory _Keys instance."""
+    original_path = globals()["_PATH"]
+    try:
+        import tempfile
+        tmp_dir = pathlib.Path(tempfile.mkdtemp(prefix="keychain_self_test_"))
+        globals()["_PATH"] = tmp_dir / "ga_keychain.enc"
+        isolated = _Keys()
+        isolated.set("sample", "secret-value")
+        reloaded = _Keys()
+        return (
+            reloaded.sample.use() == "secret-value"
+            and "sample" in reloaded.ls()
+            and repr(reloaded.sample) != "secret-value"
+            and get_credentials_for_proxy([]) == {}
+        )
+    finally:
+        globals()["_PATH"] = original_path
+
+
 def __getattr__(name): return getattr(keys, name)

@@ -91,6 +91,21 @@ def ocr_window(hwnd, lang=_LANG, enhance=False, engine=None):
     win32gui.ReleaseDC(hwnd, hwndDC)
     return ocr_image(img, lang, enhance, engine)
 
+def self_test():
+    """Smoke test without loading OCR model or capturing screen."""
+    assert _strip_cjk_spaces('你 好 world') == '你好 world'
+    img = Image.new('RGB', (2, 3), 'white')
+    enlarged = _preprocess(img, scale=2, contrast=1.0)
+    assert enlarged.size == (4, 6)
+    try:
+        ocr_image(object())
+    except Exception as e:
+        assert type(e).__name__ in ('AttributeError', 'TypeError', 'LoadImageError')
+    else:
+        raise AssertionError('ocr_image should reject non-image input')
+    return True
+
+
 if __name__ == "__main__":
     r = ocr_screen((0, 0, 400, 100))
     print(f"识别结果: {r['text']}")

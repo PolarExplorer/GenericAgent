@@ -1,16 +1,25 @@
-import webview, threading, subprocess, sys, time, os, ctypes, atexit, socket, random
+import webview, threading, subprocess, sys, time, os, ctypes, atexit, socket
 
 WINDOW_WIDTH, WINDOW_HEIGHT, RIGHT_PADDING, TOP_PADDING = 600, 900, 0, 100
+DEFAULT_PORT = 18513
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 frontends_dir = os.path.join(script_dir, "frontends")
 
-def find_free_port(lo=18501, hi=18599):
-    ports = list(range(lo, hi+1)); random.shuffle(ports)
-    for p in ports:
-        try: s = socket.socket(); s.bind(('127.0.0.1', p)); s.close(); return p
-        except OSError: continue
-    raise RuntimeError(f'No free port in {lo}-{hi}')
+def is_local_port_open(port, host='127.0.0.1', timeout=0.5):
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+def wait_for_local_port(port, host='127.0.0.1', timeout=20, poll_interval=0.2):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if is_local_port_open(port, host=host, timeout=min(poll_interval, 0.5)):
+            return True
+        time.sleep(poll_interval)
+    return False
 
 def get_screen_width():
     try: return ctypes.windll.user32.GetSystemMetrics(0)
@@ -90,44 +99,67 @@ if __name__ == '__main__':
     parser.add_argument('--sched', action='store_true', help='启动计划任务调度器')
     parser.add_argument('--llm_no', type=int, default=0, help='LLM编号')
     args = parser.parse_args()
-    port = str(find_free_port()) if args.port == '0' else args.port
-    print(f'[Launch] Using port {port}')
-    threading.Thread(target=start_streamlit, args=(port,), daemon=True).start()
 
-    if args.tg:
+    if args.port == '0':
+        port = str(DEFAULT_PORT)
+    else:
+        port = str(args.port)
+
+    existing_instance = is_local_port_open(port)
+    if existing_instance:
+        print(f'[Launch] Existing instance detected on port {port}, attaching webview only')
+    else:
+        print(f'[Launch] Starting new instance on port {port}')
+        threading.Thread(target=start_streamlit, args=(port,), daemon=True).start()
+        if not wait_for_local_port(port, timeout=20):
+            raise RuntimeError(f'Streamlit did not become ready on port {port}')
+
+    if args.tg and not existing_instance:
         tgproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "tgapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         atexit.register(tgproc.kill)
         print('[Launch] Telegram Bot started')
+    elif args.tg:
+        print('[Launch] Telegram Bot start skipped because existing instance is reused')
     else: print('[Launch] Telegram Bot not enabled (use --tg to start)')
 
-    if args.qq:
+    if args.qq and not existing_instance:
         qqproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "qqapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         atexit.register(qqproc.kill)
         print('[Launch] QQ Bot started')
+    elif args.qq:
+        print('[Launch] QQ Bot start skipped because existing instance is reused')
     else: print('[Launch] QQ Bot not enabled (use --qq to start)')
 
-    if args.feishu:
+    if args.feishu and not existing_instance:
         fsproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "fsapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         atexit.register(fsproc.kill)
         print('[Launch] Feishu Bot started')
+    elif args.feishu:
+        print('[Launch] Feishu Bot start skipped because existing instance is reused')
     else: print('[Launch] Feishu Bot not enabled (use --feishu to start)')
 
-    if args.wecom:
+    if args.wecom and not existing_instance:
         wcproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "wecomapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         atexit.register(wcproc.kill)
         print('[Launch] WeCom Bot started')
+    elif args.wecom:
+        print('[Launch] WeCom Bot start skipped because existing instance is reused')
     else: print('[Launch] WeCom Bot not enabled (use --wecom to start)')
 
-    if args.dingtalk:
+    if args.dingtalk and not existing_instance:
         dtproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "dingtalkapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         atexit.register(dtproc.kill)
         print('[Launch] DingTalk Bot started')
+    elif args.dingtalk:
+        print('[Launch] DingTalk Bot start skipped because existing instance is reused')
     else: print('[Launch] DingTalk Bot not enabled (use --dingtalk to start)')
     
-    if args.sched:
+    if args.sched and not existing_instance:
         scheduler_proc = subprocess.Popen([sys.executable, os.path.join(script_dir, "agentmain.py"), "--reflect", os.path.join(script_dir, "reflect", "scheduler.py"), "--llm_no", str(args.llm_no)], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         atexit.register(scheduler_proc.kill)
         print('[Launch] Task Scheduler started (duplicate prevented by scheduler port lock)')
+    elif args.sched:
+        print('[Launch] Task Scheduler start skipped because existing instance is reused')
     else: print('[Launch] Task Scheduler not enabled (--sched)')
 
     monitor_thread = threading.Thread(target=idle_monitor, daemon=True)
@@ -136,7 +168,7 @@ if __name__ == '__main__':
         screen_width = get_screen_width()
         x_pos = screen_width - WINDOW_WIDTH - RIGHT_PADDING
     else: x_pos = 100
-    time.sleep(2) 
+    time.sleep(2)
     window = webview.create_window(
         title='GenericAgent', url=f'http://localhost:{port}',
         width=WINDOW_WIDTH, height=WINDOW_HEIGHT, x=x_pos, y=TOP_PADDING,

@@ -301,6 +301,7 @@ def stop_component(name, cfg, force=False):
             kill_pid(pid, protected_pids, reason=f"{name}: keyword/port cleanup")
 
     # 4) 等端口释放
+    stop_ok = True
     if cfg["ports"]:
         freed = wait_condition(
             lambda: not any(port_in_use(p) for p in cfg["ports"]),
@@ -308,9 +309,9 @@ def stop_component(name, cfg, force=False):
         )
         if not freed:
             log(f"[WARN] 端口 {cfg['ports']} 仍被占用")
-            return False
+            stop_ok = False
 
-    # 5) 清理 stop_file 和 stale lock_file
+    # 5) 清理 stop_file 和 stale lock_file（无论端口是否释放都必须执行）
     for f in [cfg["stop_file"], cfg["lock_file"]]:
         if f is None:
             continue
@@ -320,8 +321,11 @@ def stop_component(name, cfg, force=False):
         except Exception:
             pass
 
-    log(f"[OK] {name} 已停止")
-    return True
+    if stop_ok:
+        log(f"[OK] {name} 已停止")
+    else:
+        log(f"[WARN] {name} 停止不完整（端口未释放），已清理信号文件")
+    return stop_ok
 
 
 def start_component(name, cfg):
@@ -335,6 +339,15 @@ def start_component(name, cfg):
     if not os.path.isfile(daemon_path):
         log(f"[FAIL] daemon 文件不存在: {daemon_path}")
         return False
+
+    # 防御性清理：确保 stop_file 不会让新 daemon 一启动就退出
+    if cfg.get("stop_file"):
+        try:
+            if os.path.exists(cfg["stop_file"]):
+                os.remove(cfg["stop_file"])
+                log(f"[CLEAN] 启动前清理残留 stop_file: {os.path.basename(cfg['stop_file'])}")
+        except Exception:
+            pass
 
     # 查找 pythonw.exe（与当前 python 同目录）
     pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
