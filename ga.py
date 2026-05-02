@@ -201,6 +201,12 @@ def file_patch(path: str, old_content: str, new_content: str):
         if count == 0: return {"status": "error", "msg": "未找到匹配的旧文本块，建议：先用 file_read 确认当前内容，再分小段进行 patch。若多次失败则询问用户，严禁自行使用 overwrite 或代码替换。"}
         if count > 1: return {"status": "error", "msg": f"找到 {count} 处匹配，无法确定唯一位置。请提供更长、更具体的旧文本块以确保唯一性。建议：包含上下文行来增强特征，或分小段逐个修改。"}
         updated_text = full_text.replace(old_content, new_content)
+        # ── ScriptGuard: validate memory/*.py before write ──
+        try:
+            from script_guard import validate_python_write as _sg_validate
+            _sg_ok, _sg_err = _sg_validate(path, updated_text)
+            if not _sg_ok: return {"status": "error", "msg": f"[ScriptGuard] 写入被拦截 - {_sg_err}"}
+        except ImportError: pass
         with open(path, 'w', encoding='utf-8') as f: f.write(updated_text)
         return {"status": "success", "msg": "文件局部修改成功"}
     except Exception as e: return {"status": "error", "msg": str(e)}
@@ -406,6 +412,18 @@ class GenericAgentHandler(BaseHandler):
             return StepOutcome({"status": "error", "msg": "No content found. Put content inside <file_content>...</file_content> tags in your reply body before call file_write."}, next_prompt="\n")
         try:
             new_content = expand_file_refs(blocks, base_dir=self.cwd)
+            # ── ScriptGuard: validate memory/*.py before write ──
+            try:
+                from script_guard import validate_python_write as _sg_validate
+                _sg_final = new_content
+                if mode in ("prepend", "append"):
+                    _sg_old = open(path, 'r', encoding="utf-8").read() if os.path.exists(path) else ""
+                    _sg_final = (new_content + _sg_old) if mode == "prepend" else (_sg_old + new_content)
+                _sg_ok, _sg_err = _sg_validate(path, _sg_final)
+                if not _sg_ok:
+                    yield f"[ScriptGuard] BLOCKED: {_sg_err}\n"
+                    return StepOutcome({"status": "error", "msg": f"[ScriptGuard] {_sg_err}"}, next_prompt="\n")
+            except ImportError: pass
             if mode == "prepend":
                 old = open(path, 'r', encoding="utf-8").read() if os.path.exists(path) else ""
                 open(path, 'w', encoding="utf-8").write(new_content + old)
