@@ -16,17 +16,21 @@ def get_last_category():
 # Category → model search keywords (substring match on backend.model.lower())
 # First keyword tried first; first matching llmclient wins
 CATEGORY_MODEL_MAP = {
-    'architecture': ['opus-4-7', 'opus-4-6'],           # SOP: 2→1
-    'planning':     ['opus-4-6', 'gpt-5.5'],             # SOP: 1→8
-    'writing':      ['opus-4-6', 'mimo-v2.5-pro'],       # SOP: 1→3
-    'hard_issue':   ['opus-4-6', 'codex'],               # SOP: 1→7
-    'coding':       ['codex', 'gpt-5.5', 'kimi'],        # SOP: 7→5
-    'agent_flow':   ['codex', 'gpt-5.5'],                # SOP: 7(5.5)→1
-    'research':     ['gpt-5.5', 'mimo-v2.5-pro'],        # SOP: 6→3
-    'docs':         ['gpt-5.5', 'kimi', 'mimo-v2.5-pro'],# SOP: 6→3/5
-    'cn_knowledge': ['deepseek', 'mimo-v2.5-pro'],       # SOP: 10→3
-    'vision':       ['mimo'],                             # SOP: 4 fixed
-    'chat':         [],                                   # keep current
+    'architecture': ['opus-4-7', 'opus-4-6'],
+    'planning':     ['opus-4-6', 'gpt-5.5'],
+    'writing':      ['opus-4-6', 'mimo-v2.5-pro'],
+    'hard_issue':   ['opus-4-6', 'gpt-5.5'],
+    # Do NOT route to model names containing "codex" here.
+    # Codex is a CLI/tool-layer executor, not the chat/model pre-router target.
+    # Pure coding tasks should be handled by tool_dispatch_sop: GA plans/reviews,
+    # then dispatches codex CLI for implementation.
+    'coding':       ['gpt-5.5', 'kimi'],
+    'agent_flow':   ['gpt-5.5', 'opus-4-6'],
+    'research':     ['gpt-5.5', 'mimo-v2.5-pro'],
+    'docs':         ['gpt-5.5', 'kimi', 'mimo-v2.5-pro'],
+    'cn_knowledge': ['deepseek', 'mimo-v2.5-pro'],
+    'vision':       ['mimo'],
+    'chat':         [],
 }
 
 # Categories where pre_router selects a "muscle" model — dispatch_gate should skip
