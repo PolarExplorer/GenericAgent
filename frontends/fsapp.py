@@ -665,6 +665,7 @@ def handle_message(data):
                     card.fail("已停止")
                     break
                 if time.time() - start > AGENT_TIMEOUT_SEC:
+                    print(f"[FSAPP_TIMEOUT_900s] open_id={open_id} elapsed={time.time()-start:.0f}s limit={AGENT_TIMEOUT_SEC}s", flush=True)
                     agent.abort()
                     card.fail("任务超时")
                     break
@@ -703,8 +704,8 @@ def handle_command(open_id, cmd, chat_id=None):
             return _send_cmd_response("❌ 当前没有可用的 LLM 配置")
         if len(parts) > 1:
             try:
-                agent.next_llm(int(parts[1]))
-                return _send_cmd_response(f"✅ 已切换到 [{agent.llm_no}] {agent.get_llm_name()}")
+                agent.next_llm(int(parts[1])); agent.baseline_llm_no = agent.llm_no
+                return _send_cmd_response(f"✅ 已切换到 [{agent.llm_no}] {agent.get_llm_name()}（已设为baseline）")
             except Exception:
                 return _send_cmd_response(f"用法: /llm <0-{len(agent.list_llms()) - 1}>")
         lines = [f"{'→' if cur else '  '} [{i}] {name}" for i, name, cur in agent.list_llms()]

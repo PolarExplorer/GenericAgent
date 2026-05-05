@@ -47,7 +47,7 @@ class GeneraticAgent:
         self.history = []; self.handler = None; 
         self.task_queue = queue.Queue() 
         self.is_running = False; self.stop_sig = False
-        self.llm_no = 0;  self.inc_out = False; self.verbose = True
+        self.llm_no = 0;  self.baseline_llm_no = 0;  self.inc_out = False; self.verbose = True
         self.peer_hint = True
         self.load_llm_sessions()
 
@@ -139,6 +139,12 @@ class GeneraticAgent:
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             
+            # Baseline regression: reset to user-chosen baseline before re-routing
+            if self.llm_no != self.baseline_llm_no:
+                _old = f'#{self.llm_no}({self.get_llm_name(model=True)})'
+                self.next_llm(self.baseline_llm_no)
+                print(f'[PreRouter] reset {_old} → #{self.baseline_llm_no}({self.get_llm_name(model=True)})')
+
             # T0 Pre-routing: lightweight DeepSeek classification → model switch
             try:
                 import ga_pre_router
@@ -171,8 +177,11 @@ class GeneraticAgent:
                 if '</summary>' in full_resp: full_resp = full_resp.replace('</summary>', '</summary>\n\n')
                 if '</file_content>' in full_resp: full_resp = re.sub(r'<file_content>\s*(.*?)\s*</file_content>', r'\n````\n<file_content>\n\1\n</file_content>\n````', full_resp, flags=re.DOTALL)
                 # 追加模型信息
-                _mt = getattr(getattr(self.llmclient, 'backend', None), 'model_trace', {})
+                _backend = getattr(self.llmclient, 'backend', None)
+                _mt = getattr(_backend, 'model_trace', {})
                 _actual_model = _mt.get('actual', '') if isinstance(_mt, dict) else ''
+                if not _actual_model:
+                    _actual_model = getattr(_backend, 'name', '') or getattr(_backend, 'model', '')
                 if _actual_model:
                     full_resp += f'\n\n🤖 {_actual_model}'
                 display_queue.put({'done': full_resp, 'source': source})

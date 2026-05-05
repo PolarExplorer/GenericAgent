@@ -607,7 +607,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                 if r.status_code >= 400:
                     if r.status_code in _RETRYABLE and attempt < sess.max_retries:
                         d = _delay(r, attempt)
-                        print(f"[LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
+                        print(f"[NET_RETRY_HTTP] [LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1}) url={url}")
                         time.sleep(d); continue
                     try: body_full = r.text.strip(); body = body_full[:500]
                     except: body_full = body = ""
@@ -642,7 +642,7 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             err = f"!!!Error: {type(e).__name__}"
             if attempt < sess.max_retries:
                 d = _delay(None, attempt)
-                print(f"[LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
+                print(f"[NET_RETRY_EXC] [LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1}) url={url} elapsed={time.time()-_req_started_at:.1f}s")
                 yield err; time.sleep(d); continue
             yield err; return [{"type": "text", "text": err}]
         except Exception as e:
@@ -903,6 +903,15 @@ class BaseSession:
         self.api_mode = 'responses' if mode in ('responses', 'response') else 'chat_completions'
         self.temperature = cfg.get('temperature', 1)
         self.max_tokens = cfg.get('max_tokens')
+    @property
+    def model_trace(self):
+        """Uniform model trace for single-backend sessions.
+
+        MixinSession overrides this with fallback details. Plain sessions still
+        expose the same shape so frontends can display the actual model.
+        """
+        actual = getattr(self, 'name', '') or getattr(self, 'model', '')
+        return {'requested': actual, 'actual': actual, 'fallback_count': 0, 'chain': [actual] if actual else []}
     def _apply_claude_thinking(self, payload):
         if self.thinking_type:
             thinking = {"type": self.thinking_type}

@@ -28,7 +28,11 @@ COMPONENTS = {
     "fsapp": {
         "stop_file": os.path.join(TEMP_DIR, "fsapp_daemon.stop"),
         "lock_file": os.path.join(TEMP_DIR, "fsapp_daemon.lock"),
-        "ports": [8765, 8766],
+        # 8765/8766 are shared local GA control/resource ports, also used by the
+        # pywebview/Streamlit frontend.  They are NOT fsapp-owned health ports;
+        # using them for stop/status can mis-detect fsapp or kill the frontend.
+        "ports": [],
+        "shared_ports": [8765, 8766],
         "daemon": "fsapp_daemon.pyw",
         "match_keywords": ["fsapp.py", "fsapp_daemon"],
     },

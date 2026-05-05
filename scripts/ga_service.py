@@ -203,6 +203,15 @@ def _component_status(name: str, cfg: dict[str, Any], listening: set[int], wmic_
         signals.append(alive)
         notes.append(f"lock_pid={lock_pid} ({'alive' if alive else 'dead'})")
 
+    keywords = [str(x).lower() for x in cfg.get("match_keywords", []) if isinstance(x, str)]
+    if keywords and wmic_text:
+        matched = any(k in wmic_text for k in keywords)
+        signals.append(matched)
+        notes.append(f"keyword_match={matched}")
+
+    # ports are only valid runtime signals when the component owns them
+    # exclusively. Shared/reference ports are reported as notes only and must
+    # not make a dead bot look RUNNING.
     ports = [int(p) for p in cfg.get("ports", []) if isinstance(p, int)]
     if ports:
         open_ports = [p for p in ports if p in listening]
@@ -210,14 +219,13 @@ def _component_status(name: str, cfg: dict[str, Any], listening: set[int], wmic_
         signals.append(all_open)
         notes.append(f"ports={ports}, open={open_ports}")
 
-    keywords = [str(x).lower() for x in cfg.get("match_keywords", []) if isinstance(x, str)]
-    if keywords and wmic_text:
-        matched = any(k in wmic_text for k in keywords)
-        signals.append(matched)
-        notes.append(f"keyword_match={matched}")
+    shared_ports = [int(p) for p in cfg.get("shared_ports", []) if isinstance(p, int)]
+    if shared_ports:
+        open_shared = [p for p in shared_ports if p in listening]
+        notes.append(f"shared_ports={shared_ports}, open={open_shared}")
 
     if not signals:
-        return "UNKNOWN", "no runtime probes available"
+        return "UNKNOWN", "no runtime probes available" if not notes else "; ".join(notes)
     if any(signals):
         return "RUNNING", "; ".join(notes)
     return "STOPPED", "; ".join(notes)

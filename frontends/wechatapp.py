@@ -320,8 +320,8 @@ def on_message(bot, msg):
         args = text.split()
         if len(args) > 1:
             try:
-                n = int(args[1]); agent.next_llm(n)
-                bot.send_text(uid, f'切换到 [{agent.llm_no}] {agent.get_llm_name()}', context_token=ctx)
+                n = int(args[1]); agent.next_llm(n); agent.baseline_llm_no = agent.llm_no
+                bot.send_text(uid, f'切换到 [{agent.llm_no}] {agent.get_llm_name()}（baseline）', context_token=ctx)
             except (ValueError, IndexError):
                 bot.send_text(uid, f'用法: /llm <0-{len(agent.list_llms())-1}>', context_token=ctx)
         else:
