@@ -203,5 +203,14 @@ def main(argv=None) -> int:
     return 2
 
 
+def self_test() -> bool:
+    """Health-check entrypoint: run isolated _self_test and return boolean."""
+    try:
+        _self_test()
+        return True
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

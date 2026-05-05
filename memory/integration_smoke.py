@@ -193,6 +193,15 @@ def _self_test():
     print("integration_smoke self_test PASSED")
 
 
+def self_test() -> bool:
+    """Health-check entrypoint: run isolated _self_test and return boolean."""
+    try:
+        _self_test()
+        return True
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         _self_test()
