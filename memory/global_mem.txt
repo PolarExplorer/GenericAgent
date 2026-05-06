@@ -40,6 +40,7 @@
 - 苏格拉底法(自检): 复杂任务执行前，thinking中完成五问——①目标对了吗 ②假设成立吗 ③有更简单做法吗 ④失败能回滚吗 ⑤用户是在征询意见还是下达指令？征询→只输出建议,禁调工具
 - 图片生成: 默认用image_gen_utils.py(right.codes/gpt/v1端点+gpt-image-2，非流式)。透明背景需降级gpt-image-1.5
 - 开发: 改完主动验证(test/lint/build) | 禁注释掉报错要找根因 | 密钥不进代码 | 需要人工审查的部分先让 llm 1 review 一遍
+- LLM1审查入口(已验证): `from agentmain import GeneraticAgent`; `agent=GeneraticAgent(); agent.next_llm(1); gen=agent.llmclient.chat([{"role":"user","content":prompt}])`，消费generator直到StopIteration取response；不要从`llmcore`猜`ask_llm`或直接`backend.ask(str)`
 - Codex验证: Codex/GPT-5.5返回结果不可裸信"done"，必须验证闭环(跑测试/截图确认/diff review)，尤其复杂或边界任务
 - 桌面文档默认位置: 用户要求以后凡是在桌面生成文档，默认放「桌面/AI产出/」；按需在其下建子目录分类(设计文档/微信素材/提取文档/生成图片等)；「桌面/AI学习/」只放外部学习资料(PDF/课件等)
 - Git: commit英文简洁 | git push等用户说 | 部署走项目自己的命令
