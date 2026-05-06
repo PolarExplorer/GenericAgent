@@ -45,7 +45,7 @@
 - Git: commit英文简洁 | git push等用户说 | 部署走项目自己的命令
 - 模型分发: 执行类子任务(编码/信息收集/数据处理)必须走subagent分发给肌肉模型，大脑只做规划决策验证。连续≥3轮同类执行→强制反思分发。详见model_dispatch_sop分发门
 - SOP/Skill同步: 以后凡新增或更新 `memory/*_sop.md` / `memory/*.py` 中的可用 Skill，必须同步到桌面 `GA_指令速查.md`，方便日后查阅
-- 类型化记忆治理: 已落地 `typed_memory_sop.md` + `typed_memory_utils.py`；长期记忆先分类(user_preference/environment/procedure/skill/constraint/failure_lesson/project_state/external_fact)，召回优先，写入前检查冲突与新鲜度；工具只读不自动写记忆
+- 类型化记忆治理: 已落地 `typed_memory_sop.md` + `typed_memory_utils.py`（分类/召回/冲突/新鲜度只读助手）+ `memory_conflict_scan.py`（重复/冲突/新鲜度/层混杂只读扫描，支持`--root`边界）
 
 ## [问题修复记录] <!-- updated: 2026-05-05 -->
 - **飞书bot模型显示不生效+旧进程抢占ws** (2026-04-29): 三个根因叠加：①`if exit_reason / elif summary`的if/elif结构导致有exit_reason时summary分支被跳过，模型信息丢失 ②重启daemon后旧子进程(PID不同)仍存活抢占websocket连接，新进程收不到消息 ③pythonw stdout重定向到文件时默认全缓冲，print(flush=True)不可靠。教训: **重启长驻服务必须先tasklist查所有同名进程再全部清理，不能只靠daemon的stop机制**；改.py文件后必须清`__pycache__`或设`PYTHONDONTWRITEBYTECODE=1`防止pyc缓存；daemon启动子进程必须设`PYTHONUNBUFFERED=1`；if/elif加新分支时检查所有分支是否都需要新逻辑
@@ -53,7 +53,7 @@
 - **subagent产出文件写到cwd而非目标dir** (2026-04-30): 升级3 subagent将skill_solidifier.py写到temp/而非memory/，ModuleNotFoundError。教训: **subagent编码任务prompt必须显式指定输出文件绝对路径**，brain验收时先检查文件是否在正确位置再跑测试
 - **subagent验收标准必须基于真实API** (2026-04-30): 升级2首次分发时验收标准假设了错误的keychain API格式，subagent中途停下提问。教训: **分发前先file_read被改文件确认实际接口，再写验收标准**；不能凭记忆或plan描述假设API
 - **OAI兼容端点assistant空content触发400** (2026-05-01): `_msgs_claude2oai()`中assistant消息无text block时`content=""`空字符串，当该消息同时携带tool_calls时，OAI兼容API校验"must have content/reasoning_content or tool_calls"失败返回400（空字符串≠None，被视为无有效content）。修复: L700改为有tool_calls时content=None，无tool_calls且无text时content="(empty)"占位。教训: **OAI格式assistant消息有tool_calls时content必须为None而非空字符串**；Claude→OAI转换层需对每种角色的空值语义做区分处理
-- **SOP评估/收录闭环与约束误报处理** (2026-04-30): 用户给Sophub SOP问“是否有帮助”时，先直接评估网页、后补查记忆，触发REG-R009；确认“按你说的办”后又因summary/连续执行警告导致需要用户多次“继续”。教训: ①资料/SOP评估前先查现有相关记忆再判断收录位置 ②用户确认执行后按“读规范→改动→验证→仅暂存本次hunk→commit→汇报”闭环推进，除非不可逆风险不等待催促 ③遇到约束引擎疑似误报（如GUI/定时关键词串扰）当轮说明并继续真实任务 ④memory仓库脏工作区时禁止git add -A，用patch/index精确暂存本次改动
+- **SOP评估/收录闭环与约束误报处理** (2026-04-30): 复盘Sophub SOP收录中先评估后查记忆、确认后推进不够闭环、约束误报串扰等问题。教训: SOP/资料评估需先查现有记忆定位收录层级；用户确认执行后要闭环推进并精确暂存本次改动；遇约束误报说明后继续真实任务
 - **raw_ask空messages致IndexError崩溃** (2026-05-01): MixinSession._raw_ask fallback路径用`target.history[-1]`但history可能为空列表→IndexError→后端崩溃。同时4个raw_ask入口均未对空messages做防御。修复: Layer1=fallback处空history检查；Layer2=4个入口加空messages早期返回guard(commit c169c00)。教训: **任何取history[-1]的代码必须先检查非空**；多session继承链中fallback路径是空状态高发区需逐层防御
 - **Responses API孤儿tool消息致400** (2026-05-01): tool角色消息的tool_call_id在前序assistant消息中无对应function_call→生成orphan function_call_output→Responses API 400。_sanitize_responses_tool_chain已有清理但依赖上游正确构建。教训: **Claude→Responses转换时tool_call_id映射必须完整**；sanitize层是最后防线不应常态触发
 - **history错误消息累积致session不可恢复** (2026-05-01): API错误(400/500等)产生的`!!!Error`消息残留在history中，后续ask()携带脏history反复触发错误形成死循环。四处修改: A._openai_stream空input提前guard返回错误而非发请求; B.BaseSession.ask错误时自动调heal()清理history; C._heal_history从只pop尾部改为**全量扫描过滤**(原实现只while pop末尾，中间夹杂的错误消息无法清除); D.MixinSession fallback全失败时heal所有子session。验证: 5项单元测试+3项端到端实测(正常ask/注入错误恢复/heal直接清理)全PASS。教训: **history清理必须全量扫描不能只处理尾部**；错误恢复机制应在ask层自动触发而非依赖外部调用

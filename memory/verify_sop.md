@@ -84,6 +84,8 @@
 
 当产出是代码变更时，在 VERDICT 前增加一轮结构化审查。来源：ECC code-reviewer 置信度过滤机制。
 
+触发条件与固定输出格式见 `code_review_sop.md` 的 Independent Review 触发规则；本附录只规定验证态里的审查纪律。
+
 ### 审查分级（按严重度排序，高级别优先报告）
 
 | 级别 | 含义 | 示例 |
