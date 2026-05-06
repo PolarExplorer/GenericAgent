@@ -5,6 +5,22 @@ try:
     from ga_audit import preview_r061_pre_tool_guard
 except Exception:
     preview_r061_pre_tool_guard = None
+try:
+    from observation_compression_hook import observe_tool_result_content
+except Exception:
+    def observe_tool_result_content(content, **kwargs): return content
+
+def _safe_observe_tool_result_content(content, **kwargs):
+    """Fail-open wrapper for optional shadow observation hook.
+
+    The hook is intentionally non-critical: tool_result content must remain the
+    original string even if the hook import/function regresses in a future edit.
+    """
+    try:
+        observed = observe_tool_result_content(content, **kwargs)
+        return observed if isinstance(observed, str) else content
+    except Exception:
+        return content
 @dataclass
 class StepOutcome:
     data: Any
@@ -95,17 +111,17 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema, 
                 # Append tool_result before break so history stays paired (tool_use ↔ tool_result)
                 if tool_name != 'no_tool':
                     datastr = json.dumps(outcome.data, ensure_ascii=False, default=json_default) if type(outcome.data) in [dict, list] else str(outcome.data) if outcome.data is not None else '(exited)'
-                    tool_results.append({'tool_use_id': tid, 'content': datastr})
+                    tool_results.append({'tool_use_id': tid, 'content': _safe_observe_tool_result_content(datastr, tool_name=tool_name, tool_use_id=tid)})
                 exit_reason = {'result': 'EXITED', 'data': outcome.data}; break
             if not outcome.next_prompt:
                 if tool_name != 'no_tool':
                     datastr = json.dumps(outcome.data, ensure_ascii=False, default=json_default) if type(outcome.data) in [dict, list] else str(outcome.data) if outcome.data is not None else '(done)'
-                    tool_results.append({'tool_use_id': tid, 'content': datastr})
+                    tool_results.append({'tool_use_id': tid, 'content': _safe_observe_tool_result_content(datastr, tool_name=tool_name, tool_use_id=tid)})
                 exit_reason = {'result': 'CURRENT_TASK_DONE', 'data': outcome.data}; break
             if outcome.next_prompt.startswith('未知工具'): client.last_tools = ''
             if outcome.data is not None and tool_name != 'no_tool': 
                 datastr = json.dumps(outcome.data, ensure_ascii=False, default=json_default) if type(outcome.data) in [dict, list] else str(outcome.data) 
-                tool_results.append({'tool_use_id': tid, 'content': datastr})
+                tool_results.append({'tool_use_id': tid, 'content': _safe_observe_tool_result_content(datastr, tool_name=tool_name, tool_use_id=tid)})
             next_prompts.add(outcome.next_prompt)
         if len(next_prompts) == 0 or exit_reason:
             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED': break
