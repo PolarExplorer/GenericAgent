@@ -311,12 +311,12 @@ def build_execution_memory_cycle_prompt(response_text, tool_calls, tool_results,
         )
         for h in history_info[-8:]
     )
-    complex_or_risky_context = (
-        len(tool_calls) >= 2 or
+    checkpoint_risky_context = (
         bool(failed_tools) or
         bool(violations) or
         bool(completion_claim) or
-        any(kw in response_text for kw in ('多步', '复杂', 'SOP', 'sop', 'memory', '记忆', '失败', '报错', '验证'))
+        any(kw in response_text for kw in ('多步', '复杂', 'memory', '记忆', '失败', '报错')) or
+        len(tool_calls) >= 3
     )
     if violations and not has_constraint_remediation:
         vids = ', '.join(str(v.get('constraint_id', '?')) for v in violations[:3] if isinstance(v, dict))
@@ -328,7 +328,7 @@ def build_execution_memory_cycle_prompt(response_text, tool_calls, tool_results,
     if completion_claim and not (has_verify_tool or evidence_terms):
         gaps.append('completion/fix/pass claim without explicit verification evidence')
         repairs.append('run or cite concrete verification before claiming done/fixed/usable')
-    if read_sop_or_memory and not has_memory_checkpoint and complex_or_risky_context:
+    if read_sop_or_memory and not has_memory_checkpoint and checkpoint_risky_context:
         gaps.append('SOP/memory was read but key constraints may not be persisted')
         repairs.append('if task is multi-step, call update_working_checkpoint with extracted constraints')
 
