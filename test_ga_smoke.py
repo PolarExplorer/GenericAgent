@@ -76,3 +76,39 @@ def test_write_tools_gated(handler_cls, method_name):
 def test_turn_end_audits_coding_gate(handler_cls):
     src = inspect.getsource(handler_cls.turn_end_callback)
     assert "_coding_gate" in src
+
+
+# ---------- file_read governance regression ----------
+
+def test_file_read_default_count_and_partial_hint(tmp_path, ga_module):
+    sample = tmp_path / "large.txt"
+    sample.write_text("\n".join(f"line {i}" for i in range(1, 151)), encoding="utf-8")
+
+    result = ga_module.file_read(str(sample), show_linenos=True)
+
+    assert "PARTIAL showing 120" in result
+    assert "Prefer keyword or start+count ranges" in result
+    assert "120|line 120" in result
+    assert "121|line 121" not in result
+
+
+def test_do_file_read_caps_count(tmp_path, handler_cls):
+    sample = tmp_path / "large.txt"
+    sample.write_text("\n".join(f"line {i}" for i in range(1, 351)), encoding="utf-8")
+    handler = object.__new__(handler_cls)
+    handler._get_abs_path = lambda path: path
+    handler._get_anchor_prompt = lambda skip=False: ""
+
+    gen = handler.do_file_read({"path": str(sample), "count": 999}, response=None)
+    chunks = []
+    while True:
+        try:
+            chunks.append(next(gen))
+        except StopIteration as exc:
+            outcome = exc.value
+            break
+
+    assert "count capped at 300" in outcome.data
+    assert "PARTIAL showing 300" in outcome.data
+    assert "300|line 300" in outcome.data
+    assert "301|line 301" not in outcome.data

@@ -219,16 +219,16 @@ def _scan_files(base, depth=2):
             if e.is_file(): yield (e.name, e.path)
             elif depth > 0 and e.is_dir(follow_symlinks=False): yield from _scan_files(e.path, depth - 1)
     except (PermissionError, OSError): pass
-def file_read(path, start=1, keyword=None, count=200, show_linenos=True):
+def file_read(path, start=1, keyword=None, count=120, show_linenos=True):
     try:
         with open(path, 'r', encoding='utf-8', errors='replace') as f:
             stream = ((i, l.rstrip('\r\n')) for i, l in enumerate(f, 1))
             stream = itertools.dropwhile(lambda x: x[0] < start, stream)
             if keyword:
-                before = collections.deque(maxlen=count//3)
+                before = collections.deque(maxlen=max(0, count//3))
                 for i, l in stream:
                     if keyword.lower() in l.lower():
-                        res = list(before) + [(i, l)] + list(itertools.islice(stream, count - len(before) - 1))
+                        res = list(before) + [(i, l)] + list(itertools.islice(stream, max(0, count - len(before) - 1)))
                         break
                     before.append((i, l))
                 else: return f"Keyword '{keyword}' not found after line {start}. Falling back to content from line {start}:\n\n" \
@@ -239,11 +239,12 @@ def file_read(path, start=1, keyword=None, count=200, show_linenos=True):
             total_lines = (res[0][0] - 1 if res else start - 1) + realcnt + remaining
             tl_str = f"{total_lines}+" if remaining >= 5000 else str(total_lines)
             partial = total_lines > realcnt
-            total_tag = f"[FILE] {tl_str} lines" + (f" | PARTIAL showing {realcnt}; assess need for more" if partial else "") + "\n"
+            governance_hint = " Prefer keyword or start+count ranges before requesting more." if partial and not keyword else ""
+            total_tag = f"[FILE] {tl_str} lines" + (f" | PARTIAL showing {realcnt}; assess need for more.{governance_hint}" if partial else "") + "\n"
             res = [(i, l if len(l) <= L_MAX else l[:L_MAX] + TAG) for i, l in res]
             result = "\n".join(f"{i}|{l}" if show_linenos else l for i, l in res)
             if show_linenos: result = total_tag + result
-            elif partial: result += f"\n\n[FILE PARTIAL: showing {realcnt}/{tl_str} lines; assess need for more]"
+            elif partial: result += f"\n\n[FILE PARTIAL: showing {realcnt}/{tl_str} lines; assess need for more.{governance_hint}]"
             _read_dirs.add(os.path.dirname(os.path.abspath(path)))
             return result
     except FileNotFoundError:
@@ -541,11 +542,24 @@ class GenericAgentHandler(BaseHandler):
         path = self._get_abs_path(args.get("path", ""))
         yield f"\n[Action] Reading file: {path}\n"
         start = args.get("start", 1)
-        count = args.get("count", 200)
         keyword = args.get("keyword")
         show_linenos = args.get("show_linenos", True)
+        count_note = ""
+        try:
+            count = int(args.get("count", 120))
+        except (TypeError, ValueError):
+            count = 120
+            count_note = "[file_read governance] Invalid count normalized to 120.\n"
+        if count < 1:
+            count = 1
+            count_note = "[file_read governance] count below 1 normalized to 1.\n"
+        elif count > 300:
+            count = 300
+            count_note = "[file_read governance] count capped at 300; prefer keyword or start+count ranges for large files.\n"
         result = file_read(path, start=start, keyword=keyword,
                            count=count, show_linenos=show_linenos)
+        if count_note and not result.startswith("Error:"):
+            result = count_note + result
         if show_linenos and not result.startswith("Error:"): result = '由于设置了show_linenos，以下返回信息为：(行号|)内容 。\n' + result 
         if ' ... [TRUNCATED]' in result: result += '\n\n（某些行被截断，如需完整内容可改用 code_run 读取）'
         result = smart_format(result, max_str_len=20000, omit_str='\n\n[omitted long content]\n\n')
