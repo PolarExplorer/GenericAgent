@@ -25,6 +25,6 @@
 
 | ID | 日期 | 假设 | 类型 | 改动 | 验证 | 结果 | 状态 | commit | 备注 |
 |---|---|---|---|---|---|---|---|---|---|
-| 003 | 2026-05-06 | 将 invalidates 具体化为可观察触发器，可降低过期动态记忆长期污染 | write_rule | memory_volatility_sop.md 已含触发器表，确认复用；typed_memory_sop.md 补升层限制 | diff review + 关键字检查 + git status | pending | ✅ | pending | 原则2：失效/复核触发器 |
+| 003 | 2026-05-06 | 将 invalidates 具体化为可观察触发器，可降低过期动态记忆长期污染 | write_rule | memory_volatility_sop.md 已含触发器表，确认复用；typed_memory_sop.md 补升层限制 | diff review + 关键字检查 + git status | 关键字与表格列数检查通过；新增 typed 升层限制；volatility 触发器规则已存在并复用 | ✅ | 5e29d81 | 原则2：失效/复核触发器 |
 | 002 | 2026-05-06 | 写入前显式区分事实/假设/边界/失效条件，可降低未验证推断污染长期记忆 | write_rule | typed_memory_sop.md 增加四格写入门控；memory_volatility_sop.md 模板已含四格字段 | diff review + git status | typed SOP 增加13行门控说明；volatility 模板已具备字段无需新增差异 | ✅ | c23d0bf | 原则1：事实-假设-边界-失效条件 |
 | 001 | 2026-05-06 | 建立实验轨迹表本身可提升改造可控性 | infra | 新建 memory_experiment_log.md | 文件存在+L1索引 | 已创建 | ✅ | — | 首条基线记录 |
