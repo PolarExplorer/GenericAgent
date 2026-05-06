@@ -29,6 +29,14 @@ _RISK_WORDS = (
     "unsafe", "delete", "overwrite", "secret", "token", "password", "api_key",
     "medium risk", "high risk", "finding", "limitation", "violation",
 )
+_HARD_DENY_TOOLS = {"ask_user"}
+_HARD_DENY_SNIPPETS = (
+    "llm1", "code review", "review verdict", "```diff", "diff --git", "@@",
+    "begin patch", "exact patch", "apply_patch", "file]", "line-numbered",
+    "bearer ", "-----begin", "private key",
+)
+_ALLOWLIST_TOOLS = {"code_run", "web_scan"}
+_MAX_CANDIDATE_CHARS = 1800
 
 
 def observation_compression_enabled() -> bool:
@@ -68,11 +76,77 @@ def _evidence_lines(redacted_text: str, limit: int = 8) -> list[str]:
     return [line for _, _, line in sorted(scored)[:limit]]
 
 
+def _is_hard_deny(content: str, tool_name: str, secret_detected: bool) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    low = content.lower()
+    if tool_name in _HARD_DENY_TOOLS:
+        reasons.append("deny_tool")
+    if secret_detected:
+        reasons.append("secret_raw")
+    for marker in _HARD_DENY_SNIPPETS:
+        if marker in low:
+            reasons.append(f"deny_marker:{marker}")
+    if any(word in low for word in ("permission", "denied", "unsafe")):
+        reasons.append("permission_or_safety_sensitive")
+    return bool(reasons), sorted(set(reasons))
+
+
+def _build_candidate_text(redacted_text: str, evidence: list[str], tool_name: str, raw_chars: int) -> str:
+    header = f"[shadow compression candidate: tool={tool_name}, raw_chars={raw_chars}]"
+    body = "\n".join(f"- {line}" for line in evidence)
+    candidate = f"{header}\n{body}" if body else header
+    if len(candidate) > _MAX_CANDIDATE_CHARS:
+        candidate = candidate[:_MAX_CANDIDATE_CHARS - 32] + "\n...[truncated_candidate]"
+    return candidate
+
+
+def build_compression_candidate_evaluation(content: str, *, tool_name: str = "generic", source_ref: str = "agent_loop") -> Dict[str, Any]:
+    """Build a shadow-only candidate compression evaluation without changing content.
+
+    The result is a sidecar for measurement only. It must never be interpreted as
+    permission to replace the prompt-visible observation in this phase.
+    """
+    redacted, secret = _redact(content)
+    risks = _risk_signals(content)
+    evidence = _evidence_lines(redacted)
+    hard_deny, deny_reasons = _is_hard_deny(content, tool_name, secret)
+    allowlisted = tool_name in _ALLOWLIST_TOOLS
+    raw_chars = len(content)
+    candidate = _build_candidate_text(redacted, evidence, tool_name, raw_chars)
+    candidate_sha = _sha12(candidate)
+    ratio = round(len(candidate) / raw_chars, 3) if raw_chars else 1.0
+    boilerplate_only = allowlisted and not hard_deny and raw_chars >= 1200 and ratio <= 0.7
+    loss_class = "boilerplate-only" if boilerplate_only else "lossy-risk"
+    return {
+        "schema": "ga.observation_compression_candidate.v1",
+        "shadow_only": True,
+        "returned_observation_identity": "unchanged_by_contract",
+        "tool": tool_name,
+        "source_ref": source_ref,
+        "candidate_preview": candidate,
+        "candidate_sha256_12": candidate_sha,
+        "candidate_chars": len(candidate),
+        "candidate_raw_ratio": ratio,
+        "allowlisted_tool": allowlisted,
+        "hard_deny": hard_deny,
+        "deny_reasons": deny_reasons,
+        "loss_class": loss_class,
+        "gate": {
+            "sensitive_safe": not secret,
+            "traceable": bool(source_ref) and raw_chars > 0,
+            "decision_equivalent": boilerplate_only,
+            "eligible_for_future_replacement": False,
+        },
+        "notes": "P16 evaluation only; never replaces LLM-visible observation.",
+        "risk_signals": risks,
+    }
+
+
 def build_observation_shadow_record(content: str, *, tool_name: str = "generic", tool_use_id: str = "", source_ref: str = "agent_loop") -> Dict[str, Any]:
     """Build a compact, redacted side-channel record for a tool result string."""
     redacted, secret = _redact(content)
     evidence = _evidence_lines(redacted)
-    return {
+    row = {
         "schema": "ga.observation_shadow.v1",
         "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "shadow_only": True,
@@ -93,6 +167,8 @@ def build_observation_shadow_record(content: str, *, tool_name: str = "generic",
             "decision_equivalent": bool(evidence),
         },
     }
+    row["compression_candidate"] = build_compression_candidate_evaluation(content, tool_name=tool_name, source_ref=source_ref)
+    return row
 
 
 def _append_jsonl(row: Dict[str, Any]) -> None:
@@ -130,6 +206,7 @@ def observe_tool_result_content(content: str, *, tool_name: str = "generic", too
 
 __all__ = [
     "build_observation_shadow_record",
+    "build_compression_candidate_evaluation",
     "observe_tool_result_content",
     "observation_compression_enabled",
 ]
