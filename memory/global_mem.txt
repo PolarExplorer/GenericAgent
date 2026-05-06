@@ -59,6 +59,7 @@
 - **Responses API孤儿tool消息致400** (2026-05-01): tool角色消息的tool_call_id在前序assistant消息中无对应function_call→生成orphan function_call_output→Responses API 400。_sanitize_responses_tool_chain已有清理但依赖上游正确构建。教训: **Claude→Responses转换时tool_call_id映射必须完整**；sanitize层是最后防线不应常态触发
 - **history错误消息累积致session不可恢复** (2026-05-01): API错误(400/500等)产生的`!!!Error`消息残留在history中，后续ask()携带脏history反复触发错误形成死循环。四处修改: A._openai_stream空input提前guard返回错误而非发请求; B.BaseSession.ask错误时自动调heal()清理history; C._heal_history从只pop尾部改为**全量扫描过滤**(原实现只while pop末尾，中间夹杂的错误消息无法清除); D.MixinSession fallback全失败时heal所有子session。验证: 5项单元测试+3项端到端实测(正常ask/注入错误恢复/heal直接清理)全PASS。教训: **history清理必须全量扫描不能只处理尾部**；错误恢复机制应在ask层自动触发而非依赖外部调用
 - **约束引擎误报: C031-WM-BEFORE-LTM + R040** (2026-05-05): ①C031 lookback=5太窄，memory连续patch场景5轮内无checkpoint但实际有→误报。修复: lookback 5→15 ②R040对任何file_patch/file_write代码文件触发"改完代码跑test"，小patch(1行bugfix)也被误报。修复: DSL加min_content_length:500，引擎_check_precondition增加内容长度过滤(<阈值skip)。验证: 4项测试PASS(小编辑skip/大编辑fail/窗口内有checkpoint pass/无checkpoint fail)。教训: **precondition类规则需区分操作规模，小改动不应触发重量级要求**；DSL顶层为dict结构非list
+- **file_read默认窗口治理** (2026-05-06): 为降低上下文噪声，`file_read.count` 默认从200降到120，硬上限300，并在 PARTIAL 输出提示优先 keyword 或 start+count 续读；同步更新中英文schema与smoke测试。验证: `test_ga_smoke.py`、schema JSON/default检查、LLM1审查(PASS_WITH_RISK无阻塞)、提交`8a94ecd`后短观察样本420行通过默认/续读/keyword/超大count截断，仓库干净。教训: 高频读文件工具优先用默认窗口+续读提示降噪，不继续扩大上下文压缩复杂度。
 
 ## [GitHub] <!-- updated: 2026-04-25 -->
 - 用户: PolarExplorer, Token: mykey.py GITHUB_TOKEN (ghp_开头, scopes: repo+read:org)
