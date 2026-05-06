@@ -47,8 +47,9 @@
 1. 已读取 `memory_management_sop`。
 2. 信息来自成功工具调用、用户明确偏好或已验证产物。
 3. 已分类到第2节的类型。
-4. 已检查是否与现有 L1/L2/L3 冲突。
-5. 写入最小必要内容，避免把任务流水账写入长期记忆。
+4. 已按 `memory_discovery_taxonomy.md` 判断问题/改动主类：`ingestion` / `retrieval` / `consolidation` / `format` / `pipeline` / `infra`；无法归类时先不升层，放 working/project_board/L4 继续观察。
+5. 已检查是否与现有 L1/L2/L3 冲突。
+6. 写入最小必要内容，避免把任务流水账写入长期记忆。
 
 ### 4.1 事实-假设-边界-失效条件门控
 

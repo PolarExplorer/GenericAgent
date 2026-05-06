@@ -86,7 +86,7 @@
 
 ## 使用方式
 
-在 `memory_experiment_log.md` 中填写"类型"列时，使用上述 6 个标签之一：
-`ingestion` / `retrieval` / `consolidation` / `format` / `pipeline` / `infra`
-
-若一次改动涉及多类，用主类标记，备注列注明次类。
+1. 在 `memory_experiment_log.md` 中填写"类型"列时，使用上述 6 个标签之一：
+   `ingestion` / `retrieval` / `consolidation` / `format` / `pipeline` / `infra`
+2. 写入 L1/L2/L3 前，也先用上述 6 类判断候选记忆对应的问题/改动主类；无法归类的候选，先不升层，放 working/project_board/L4 继续观察。
+3. 若一次改动涉及多类，用主类标记，备注列注明次类。
