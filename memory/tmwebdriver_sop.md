@@ -1,5 +1,16 @@
 # TMWebDriver SOP
 
+## Struct Header
+- Trigger: 需要操作用户浏览器、登录态页面、跨域 iframe、文件上传、PDF blob、复杂网页交互。
+- Inputs: 目标网页/标签页、成功标准、元素线索、登录态/权限边界。
+- Outputs: 页面状态变化、提取数据、下载/上传结果、JS/CDP/物理操作证据。
+- Tools: web_scan、web_execute_js、CDP、必要时 ljqCtrl；不优先 Selenium/Playwright。
+- Side effects: 可能点击真实账号页面、提交表单、上传文件、跨 tab 改状态。
+- Risk: R1-R3；账号提交、付款、删除、发布等按 R3 先确认。
+- Schedule: scan 定位 → JS/CDP 只读探测 → 最小交互 → 状态验证 → 必要时物理降级。
+- Failure path: JS 受限转 CDP；CDP 不足转物理操作；多次失败按 debugging_sop。
+- Review: 涉及账号不可逆操作或批量网页动作时需用户确认/独立审查。
+
 > 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
 
 - 直接用web_scan/web_execute_js工具。本文件只记录特性和坑。
