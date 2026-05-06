@@ -264,6 +264,90 @@ def smart_format(data, max_str_len=100, omit_str=' ... '):
     if len(data) < max_str_len + len(omit_str)*2: return data
     return f"{data[:max_str_len//2]}{omit_str}{data[-max_str_len//2:]}"
 
+
+def build_execution_memory_cycle_prompt(response_text, tool_calls, tool_results, violations=None, history_info=None):
+    """Build a compact turn-end prompt for the lightweight Execution Memory Cycle.
+
+    The cycle is intentionally advisory only: recall intent -> evidence gap -> repair candidate.
+    It must not mutate task state or replace existing constraint/dispatch gates.
+    """
+    response_text = response_text or ""
+    tool_calls = tool_calls or []
+    tool_results = tool_results or []
+    violations = violations or []
+    history_info = history_info or []
+
+    tool_names = [tc.get('tool_name', '') for tc in tool_calls if isinstance(tc, dict)]
+    has_verify_tool = any(name in {'code_run', 'web_execute_js', 'web_scan'} for name in tool_names)
+    has_memory_checkpoint = any(name == 'update_working_checkpoint' for name in tool_names)
+    read_sop_or_memory = False
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        args = tc.get('args', {}) or {}
+        path = str(args.get('path', '')).lower()
+        if tc.get('tool_name') == 'file_read' and ('memory/' in path or path.endswith('.md') or '_sop' in path):
+            read_sop_or_memory = True
+            break
+
+    failed_tools = []
+    for tr in tool_results:
+        s = str(tr)
+        sl = s.lower()
+        if '"status": "error"' in sl or "'status': 'error'" in sl or 'traceback' in sl or 'exit_code": 1' in sl:
+            failed_tools.append(smart_format(s, 180))
+
+    completion_claim = re.search(r'(已完成|已修复|通过验证|验证通过|可用|done|fixed|passed)', response_text, re.IGNORECASE)
+    evidence_terms = re.search(r'(py_compile|pytest|测试|验证|截图|diff|git status|exit_code|stdout|工具证据)', response_text, re.IGNORECASE)
+
+    gaps = []
+    repairs = []
+    has_constraint_remediation = bool(violations) and any(
+        isinstance(h, str) and (
+            '[ENGINE]' in h or
+            '约束引擎检测到' in h or
+            '[DANGER]' in h or
+            '[Execution Memory Cycle]' in h
+        )
+        for h in history_info[-8:]
+    )
+    complex_or_risky_context = (
+        len(tool_calls) >= 2 or
+        bool(failed_tools) or
+        bool(violations) or
+        bool(completion_claim) or
+        any(kw in response_text for kw in ('多步', '复杂', 'SOP', 'sop', 'memory', '记忆', '失败', '报错', '验证'))
+    )
+    if violations and not has_constraint_remediation:
+        vids = ', '.join(str(v.get('constraint_id', '?')) for v in violations[:3] if isinstance(v, dict))
+        gaps.append(f'constraint violation(s): {vids or "unknown"}')
+        repairs.append('before next action, state which rule failed and close it with one targeted tool call')
+    if failed_tools:
+        gaps.append('tool failure/error observed')
+        repairs.append('collect error details, form one hypothesis, then retry or switch strategy (no blind repeat)')
+    if completion_claim and not (has_verify_tool or evidence_terms):
+        gaps.append('completion/fix/pass claim without explicit verification evidence')
+        repairs.append('run or cite concrete verification before claiming done/fixed/usable')
+    if read_sop_or_memory and not has_memory_checkpoint and complex_or_risky_context:
+        gaps.append('SOP/memory was read but key constraints may not be persisted')
+        repairs.append('if task is multi-step, call update_working_checkpoint with extracted constraints')
+
+    if not gaps:
+        return ''
+
+    last_user = ''
+    for h in reversed(history_info[-20:]):
+        if isinstance(h, str) and (h.startswith('[User]') or h.startswith('[USER]')):
+            last_user = h.split(']', 1)[-1].strip()
+            break
+    recall = smart_format(last_user, 120) if last_user else 'continue current user task under active constraints'
+    gap_text = '; '.join(gaps[:3])
+    repair_text = '; '.join(dict.fromkeys(repairs[:3]))
+    return ("\n[Execution Memory Cycle] "
+            f"Recall Intent: {recall}\n"
+            f"Evidence Gap: {gap_text}\n"
+            f"Repair Candidate: {repair_text}")
+
 def consume_file(dr, file):
     if dr and os.path.exists(os.path.join(dr, file)): 
         with open(os.path.join(dr, file), encoding='utf-8', errors='replace') as f: content = f.read()
@@ -629,6 +713,16 @@ class GenericAgentHandler(BaseHandler):
         except Exception:
             pass
         # === END Constraint Engine Monitor ===
+        # === Execution Memory Cycle (lightweight advisory loop) ===
+        try:
+            _emc_prompt = build_execution_memory_cycle_prompt(
+                response.content, tool_calls, tool_results, _violations if '_violations' in locals() else [], self.history_info
+            )
+            if _emc_prompt:
+                next_prompt += _emc_prompt
+        except Exception:
+            pass
+        # === END Execution Memory Cycle ===
         # === Dispatch Gate ===
         try:
             _gate_tc = [{'tool_name': tc['tool_name'], 'args': tc.get('args', {})} for tc in tool_calls]
