@@ -98,6 +98,11 @@ assets/tmwd_cdp_bridge/config.js
 assets/copilot_proxy.pyw
 **log.*
 
+# Memory experiment infrastructure (override memory/* and **log.*)
+!memory/memory_experiment_log.md
+!memory/memory_discovery_taxonomy.md
+!memory/failed_experiment_log.md
+
 # Reflect (ignore new files, whitelist existing)
 reflect/*
 !reflect/autonomous.py
