@@ -25,6 +25,7 @@
 
 | ID | 日期 | 假设 | 类型 | 改动 | 验证 | 结果 | 状态 | commit | 备注 |
 |---|---|---|---|---|---|---|---|---|---|
+| 007 | 2026-05-06 | 从 Trace2Skill 论文蒸馏轻量三件套(trajectory patch/merge checklist/utility tracing)可规范经验写入与剪枝 | ingestion | 新建 trace2skill_sop.md；L1 索引补 trace2skill_sop | 10项关键字自检 + git status | 三阶段 SOP 落地，引用 typed/volatility/failed_log，不改源码 | ✅ | — | Trace2Skill 论文落地 |
 | 006 | 2026-05-06 | 将召回预算门控写入 typed 检索策略，可降低知识底座增长带来的上下文成本 | retrieval | typed_memory_sop.md 增加召回预算门控，引用 budget_tracker.py 的分级与压缩/降级/暂停信号 | 关键字检查 + 表格列数检查 + git status | typed 检索策略新增默认上限、扩展条件、预算信号、保真红线、输出压缩形式；表格列数一致 | ✅ | 51e022e | 原则5：记忆召回预算/Token成本门控 |
 | 005 | 2026-05-06 | 将失败/负样本先纳入 failed log 门控，可减少单次失败被泛化为正向规则 | write_rule | typed_memory_sop.md 增加失败样本禁升规则；failed_experiment_log.md 增加触发、升层、复用与转约束规则 | 关键字检查 + 表格列数检查 + git status | 失败样本门控进入 typed 写入策略；failed log 增加使用规则；表格列数一致；主仓库提交后干净 | ✅ | 2cb4403 | 原则4：失败/负样本接入写入治理 |
 | 004 | 2026-05-06 | 将 discovery taxonomy 前置到写入决策，可减少无法归类的候选直接升层 | ingestion | typed_memory_sop.md 写入策略加入 6 类 taxonomy 门控；memory_discovery_taxonomy.md 使用方式扩展到写入前归类 | 关键字检查 + 表格列数检查 + git status | taxonomy 门控已进入 typed 写入策略与 taxonomy 使用方式；表格列数一致 | ✅ | 4bb18c8 | 原则3：taxonomy 接入写入决策 |
