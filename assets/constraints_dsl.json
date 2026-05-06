@@ -1012,14 +1012,14 @@
           "scope": "path_only"
         },
         "precondition": {
-          "lookback": 5,
+          "lookback": 15,
           "tool_names": [
             "update_working_checkpoint"
           ]
         }
       },
       "severity": "high",
-      "description": "长期记忆写入前，近5轮必须先把证据和写入意图压入工作记忆，避免无依据蒸馏"
+      "description": "长期记忆写入前，近15轮必须先把证据和写入意图压入工作记忆，避免无依据蒸馏"
     },
     {
       "id": "REG-R040",
@@ -1034,7 +1034,8 @@
           ],
           "pattern": "\"path\"\\s*:\\s*\"[^\"]*(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)\"",
           "scope": "tools",
-          "exclude_pattern": "(?:temp|node_modules)[\\\\/]"
+          "exclude_pattern": "(?:temp|node_modules)[\\\\/]",
+          "min_content_length": 500
         },
         "precondition": {
           "lookback": 20,

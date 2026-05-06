@@ -9,7 +9,7 @@
 
 需要时read L2 或 ls ../memory/ 查L3
 L0(META-SOP): memory_management_sop
-L2: 飞书CLI(shell=True, user+bot双身份) | API代理(mykey.py) | Codex CLI(exec不暴露image_gen) | 用户偏好(约束先行/反谄媚/先建议后执行/SOP-Skill同步桌面速查) | GA架构演进 | 问题修复记录 | GitHub(mykey.GITHUB_TOKEN) | Git代理(127.0.0.1:8902需梯子) | 审计Dashboard | 约束引擎 | 防变砖机制(script_guard+ga_watchdog+memory_autocommit)
+L2: 飞书CLI(shell=True, user+bot双身份) | API代理(mykey.py) | Codex CLI(exec不暴露image_gen) | 用户偏好(约束先行/反谄媚/先建议后执行/SOP-Skill同步桌面速查) | GA架构演进 | 问题修复记录 | GitHub(mykey.GITHUB_TOKEN) | Git代理(127.0.0.1:8902需梯子) | 审计Dashboard | 约束引擎(68条DSL, C031 lookback=15, R040 min_content_length=500) | 防变砖机制(script_guard+ga_watchdog+memory_autocommit)
 L3: memory_cleanup_sop | typed_memory_sop+typed_memory_utils.py(记忆分类/召回计划/冲突/新鲜度只读助手) | skill_search | tool_selector(embedding粗筛→LLM精选) | ui_detect.py | ocr_utils.py | mineru_ocr.py | subagent(精确prompt: 目标/约束/绝对路径/完成定义; 不传冗长推理) | web_setup_sop | plan_sop(探索态补齐需求边界验收; 多方案先收敛; 隔离实验区) | project_board.md(跨会话任务看板)
 | verify_sop(No evidence, no claim; 未验证前不得宣称完成) | code_review_sop | debugging_sop(5阶段: 复现→信息→假设→验证→最小修复; 3次失败质疑架构) | procmem_scanner | keychain(扁平+代理模式, use/set_with_expiry/is_expired) | session_event_log(turn事件JSONL, decision事件+task_id, ga.py turn_end自动记录) | trace_viewer.py | skill_solidifier(成熟pattern→skill脚本) | ljqCtrl_sop+.py | tmwebdriver_sop | autonomous_operation_sop | scheduled_task_sop | vision_sop | adb_ui.py | mem_manager(WM压缩/HeatScore/TokenBudget/L2冲突检测/冷条目归档/staleness扫描) | mem_distill(L4蒸馏→L2/L3补丁) | mem_lifecycle(reflect时run_cycle单入口)
 | budget_tracker(任务分级+token累加+渐进降级) | pattern_registry(重复模式≥3次→提议固化, ga.py turn_end自动扫描)
@@ -23,6 +23,7 @@ L3: memory_cleanup_sop | typed_memory_sop+typed_memory_utils.py(记忆分类/召
 | sophub_ga_bbs_style(SOP共享平台API, keychain Bearer)
 | pua_skill(/pua触发) | neat_freak_skill(/neat会话结束知识同步, /neat-check只读)
 | deepresearch_sop(DAG并行分治, research_sop补充) | agentic_search_sop(代码/文件事实检索:Grep-first+证据验证) | github_contribution_sop | supervisor_sop(只读判断/禁下场) | vision_api.py+.template.py(MiniMax/Claude/OpenAI视觉后端) | script_health_check.py
-| pipeline_execution_sop+batch_runner.py+preflight_check.py+gate_runner.py+script_gate_runner.py+integration_smoke.py(多阶段流水线+脚本Gate+外部集成冒烟) | contract_sop+contract_check.py(接口契约/防覆盖) | model_switch_sop+ab_test.py(模型AB切换) | incremental_converge_sop(补缺收敛) | session_handoff_sop(跨会话交接)
+| pipeline_execution_sop+batch_runner.py+preflight_check.py+gate_runner.py+script_gate_runner.py+integration_smoke.py(多阶段流水线+脚本Gate+外部集成冒烟) | contract_sop+contract_check.py(接口契约/防覆盖) | model_switch_sop+ab_test.py(模型AB切换) | incremental_converge_sop(补缺收敛) | session_handoff_sop(跨会话交接) | long_task_autopilot_sop+long_task_autopilot.py(长任务自动推进)
+P1飞书训练: 大题型MVP验收记录见L2
 L4: L4_raw_sessions/
 规则: rules_engine.md(红线+高频犯错, begin_reasoning必读)

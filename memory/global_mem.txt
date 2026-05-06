@@ -47,7 +47,7 @@
 - SOP/Skill同步: 以后凡新增或更新 `memory/*_sop.md` / `memory/*.py` 中的可用 Skill，必须同步到桌面 `GA_指令速查.md`，方便日后查阅
 - 类型化记忆治理: 已落地 `typed_memory_sop.md` + `typed_memory_utils.py`；长期记忆先分类(user_preference/environment/procedure/skill/constraint/failure_lesson/project_state/external_fact)，召回优先，写入前检查冲突与新鲜度；工具只读不自动写记忆
 
-## [问题修复记录] <!-- updated: 2026-05-01 -->
+## [问题修复记录] <!-- updated: 2026-05-05 -->
 - **飞书bot模型显示不生效+旧进程抢占ws** (2026-04-29): 三个根因叠加：①`if exit_reason / elif summary`的if/elif结构导致有exit_reason时summary分支被跳过，模型信息丢失 ②重启daemon后旧子进程(PID不同)仍存活抢占websocket连接，新进程收不到消息 ③pythonw stdout重定向到文件时默认全缓冲，print(flush=True)不可靠。教训: **重启长驻服务必须先tasklist查所有同名进程再全部清理，不能只靠daemon的stop机制**；改.py文件后必须清`__pycache__`或设`PYTHONDONTWRITEBYTECODE=1`防止pyc缓存；daemon启动子进程必须设`PYTHONUNBUFFERED=1`；if/elif加新分支时检查所有分支是否都需要新逻辑
 - **ga_audit hot-reload命名空间分裂** (2026-04-28): `exec(src, ns)`新建ns命名空间，新函数__globals__→ns，preserved状态恢复到mod.__dict__但ns中仍是None，导致_on_turn_end读_agent_ref=None→task_id永久丢失。修复: exec后`ns.update(preserved)`再patch函数。教训: exec+setattr模式必须确保preserved同时注入ns和mod
 - **subagent产出文件写到cwd而非目标dir** (2026-04-30): 升级3 subagent将skill_solidifier.py写到temp/而非memory/，ModuleNotFoundError。教训: **subagent编码任务prompt必须显式指定输出文件绝对路径**，brain验收时先检查文件是否在正确位置再跑测试
@@ -57,6 +57,7 @@
 - **raw_ask空messages致IndexError崩溃** (2026-05-01): MixinSession._raw_ask fallback路径用`target.history[-1]`但history可能为空列表→IndexError→后端崩溃。同时4个raw_ask入口均未对空messages做防御。修复: Layer1=fallback处空history检查；Layer2=4个入口加空messages早期返回guard(commit c169c00)。教训: **任何取history[-1]的代码必须先检查非空**；多session继承链中fallback路径是空状态高发区需逐层防御
 - **Responses API孤儿tool消息致400** (2026-05-01): tool角色消息的tool_call_id在前序assistant消息中无对应function_call→生成orphan function_call_output→Responses API 400。_sanitize_responses_tool_chain已有清理但依赖上游正确构建。教训: **Claude→Responses转换时tool_call_id映射必须完整**；sanitize层是最后防线不应常态触发
 - **history错误消息累积致session不可恢复** (2026-05-01): API错误(400/500等)产生的`!!!Error`消息残留在history中，后续ask()携带脏history反复触发错误形成死循环。四处修改: A._openai_stream空input提前guard返回错误而非发请求; B.BaseSession.ask错误时自动调heal()清理history; C._heal_history从只pop尾部改为**全量扫描过滤**(原实现只while pop末尾，中间夹杂的错误消息无法清除); D.MixinSession fallback全失败时heal所有子session。验证: 5项单元测试+3项端到端实测(正常ask/注入错误恢复/heal直接清理)全PASS。教训: **history清理必须全量扫描不能只处理尾部**；错误恢复机制应在ask层自动触发而非依赖外部调用
+- **约束引擎误报: C031-WM-BEFORE-LTM + R040** (2026-05-05): ①C031 lookback=5太窄，memory连续patch场景5轮内无checkpoint但实际有→误报。修复: lookback 5→15 ②R040对任何file_patch/file_write代码文件触发"改完代码跑test"，小patch(1行bugfix)也被误报。修复: DSL加min_content_length:500，引擎_check_precondition增加内容长度过滤(<阈值skip)。验证: 4项测试PASS(小编辑skip/大编辑fail/窗口内有checkpoint pass/无checkpoint fail)。教训: **precondition类规则需区分操作规模，小改动不应触发重量级要求**；DSL顶层为dict结构非list
 
 ## [GitHub] <!-- updated: 2026-04-25 -->
 - 用户: PolarExplorer, Token: mykey.py GITHUB_TOKEN (ghp_开头, scopes: repo+read:org)
@@ -120,15 +121,16 @@
 - ADB: ga_adb.py (status/screenshot/tap/text) — 手机ADB操作(需adb已安装)
 - 使用: python scripts/ga_xxx.py subcommand [args]
 
-## [约束引擎接入] <!-- updated: 2026-04-28 -->
+## [约束引擎接入] <!-- updated: 2026-05-05 -->
 - 引擎模块: ga_constraint_engine.py (evaluate_all/evaluate_constraint/load_constraints)
-- DSL文件: GA_ROOT/assets/constraints_dsl.json (70条约束定义)
+- DSL文件: GA_ROOT/assets/constraints_dsl.json (68条约束定义, dict顶层结构dsl["constraints"])
 - 接入点: ga.py turn_end_callback (L524-551)，Monitor模式
 - 调用流程: load_constraints(path)→evaluate_all(constraints, ctx)→过滤status=fail→注入next_prompt警告
 - ctx字段: history/response_text/tool_calls/scripts/user_message
 - 模式: Monitor（违规警告不阻断）；待实现: Enforce（违规阻断）
 - 异常安全: try/except包裹，引擎异常不影响主流程
 - 坑点: load_constraints必须传path参数（__file__相对构建），不能无参调用
+- **误报修复 (2026-05-05)**: C031-WM-BEFORE-LTM lookback 5→15（原窗口太窄，memory patch场景5轮不够）; R040加min_content_length:500（小patch如1行bugfix不应触发"改完代码跑test"）; 引擎_check_precondition增加min_content_length过滤逻辑; DSL顶层为dict需用dsl["constraints"]访问规则数组; 4项测试全部通过
 
 ## [session_event_log ga.py接入] <!-- updated: 2026-05-02 -->
 - 接入点: ga.py turn_end_callback L645-656 (summary记录后, hooks前)
@@ -167,3 +169,7 @@
 - **Bug3 trailing assistant残留**: trim_messages_history裁剪后末尾可能残留无tool_result的assistant(tool_use)消息，下轮拼接新user时API报错。修复: trim末尾while循环检测最后一条是否为含tool_use的assistant，若是则pop
 - 通用教训: **history裁剪/压缩操作后必须做三项边界校验——首条角色合法性、相邻角色不重复、末尾消息完整性**
 - 验证: 4项针对性测试PASS
+
+## [P1 飞书训练系统] <!-- updated: 2026-05-05 -->
+- 大题型MVP已验收：`scripts/push/render_daily.py` 可按 `--questions qid1,qid2` 渲染 `03_题库/big_questions_seed.jsonl` 中的大题卡；`scripts/push/grading_listener.py` 已兼容 `answer→reference_answer`、`rubric→scoring_points`，大题进入人工复核并在批改卡展示参考答案/评分要点。
+- 验收记录：`D:\KnowledgeFoundation\00_项目管理\2026-05-05_P1_大题型支持MVP验收记录.md`

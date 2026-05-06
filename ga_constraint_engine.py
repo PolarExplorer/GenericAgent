@@ -198,6 +198,16 @@ def _check_precondition(params: dict, ctx: dict) -> dict:
     exclude = action_y.get("exclude_pattern")
     if exclude and _match_pattern(_get_all_text(ctx, action_y.get("scope", "all")), exclude):
         return {"status": "skip", "reason": "action excluded by exclude_pattern"}
+    # min_content_length: skip if total written content is below threshold (small edits)
+    min_len = action_y.get("min_content_length")
+    if min_len:
+        total = 0
+        for tc in ctx.get("tool_calls") or []:
+            if tc.get("tool_name") in ("file_write", "file_patch"):
+                a = tc.get("args", {})
+                total += len(a.get("new_content") or a.get("content") or "")
+        if total < min_len:
+            return {"status": "skip", "reason": f"content length {total} below threshold {min_len}"}
     if "tool_names" in action_y or "pattern" in action_y:
         y_triggered = tn_match and pat_match
 
