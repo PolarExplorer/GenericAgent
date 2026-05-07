@@ -232,8 +232,17 @@ def _extract_post_content(content_json):
 APP_ID = str(mykeys.get("fs_app_id", "") or "").strip()
 APP_SECRET = str(mykeys.get("fs_app_secret", "") or "").strip()
 ALLOWED_USERS = _to_allowed_set(mykeys.get("fs_allowed_users", []))
+BLOCKED_CHATS = _to_allowed_set(mykeys.get("fs_blocked_chats", []))
+BLOCKED_CHATS.add("oc_a1b0b767eba2fef9ae83e83fa9f9a2e2")
+TRAINING_OPEN_IDS = _to_allowed_set(mykeys.get("fs_training_open_ids", []))
+TRAINING_CHATS = _to_allowed_set(mykeys.get("fs_training_chats", []))
 PUBLIC_ACCESS = not ALLOWED_USERS or "*" in ALLOWED_USERS
 AGENT_TIMEOUT_SEC = 900
+
+
+def is_training_source(open_id, chat_id):
+    return bool(chat_id and chat_id in TRAINING_CHATS)
+
 
 agent = GeneraticAgent()
 threading.Thread(target=agent.run, daemon=True).start()
@@ -618,6 +627,12 @@ def handle_message(data):
     event, message, sender = data.event, data.event.message, data.event.sender
     open_id = sender.sender_id.open_id
     chat_id = message.chat_id
+    if is_training_source(open_id, chat_id):
+        print(f"[TRAINING_SOURCE] skip open_id={open_id} chat_id={chat_id}")
+        return
+    if chat_id and chat_id in BLOCKED_CHATS:
+        print(f"[BLOCKED_CHAT] skip chat_id={chat_id}")
+        return
     if not PUBLIC_ACCESS and open_id not in ALLOWED_USERS:
         print(f"未授权用户: {open_id}")
         return

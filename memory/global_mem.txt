@@ -172,6 +172,10 @@
 - 通用教训: **history裁剪/压缩操作后必须做三项边界校验——首条角色合法性、相邻角色不重复、末尾消息完整性**
 - 验证: 4项针对性测试PASS
 
-## [P1 飞书训练系统] <!-- updated: 2026-05-05 -->
+## [P1 飞书训练系统] <!-- updated: 2026-05-07 -->
 - 大题型MVP已验收：`scripts/push/render_daily.py` 可按 `--questions qid1,qid2` 渲染 `03_题库/big_questions_seed.jsonl` 中的大题卡；`scripts/push/grading_listener.py` 已兼容 `answer→reference_answer`、`rubric→scoring_points`，大题进入人工复核并在批改卡展示参考答案/评分要点。
+- 混合题端到端已验收：同一张题卡内「选择题+大题」文本答案可被 `scripts/push/grading_listener.py` 解析、批改并回推批改图；真实验收需群内 `sender_type=user` 消息，bot 代发不满足 listener 处理条件。
+- 飞书CLI边界：当前 `lark-cli --as user` 发送会因 `need_user_authorization` 失败；P1真实验收若需用户身份消息，应请用户在群内直接发送文字答案。
+- 术语边界：P1训练机器人=飞书机器人应用；P1训练会话=当前用于训练的chat；P1训练群=之后把机器人拉入的正式群；`BLOCKED_CHATS` 屏蔽的是chat/会话/群，不是机器人应用。
+- 灰度观察入口：`D:\KnowledgeFoundation\00_项目管理\P1_连续灰度观察\` 已建立 Day0 台账与运行手册，观察优先、不改主链路。
 - 验收记录：`D:\KnowledgeFoundation\00_项目管理\2026-05-05_P1_大题型支持MVP验收记录.md`

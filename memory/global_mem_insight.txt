@@ -23,7 +23,7 @@ L3: dev_map.md(GA开发导航图) | memory_cleanup_sop | typed_memory_sop+typed_
 | sophub_ga_bbs_style(SOP共享平台API, keychain Bearer)
 | pua_skill(/pua触发) | neat_freak_skill(/neat会话结束知识同步, /neat-check只读)
 | deepresearch_sop | agentic_search_sop | github_contribution_sop | supervisor_sop | vision_api.py+.template.py | script_health_check.py+meta_check.py
-| pipeline_execution_sop+batch_runner.py+preflight_check.py+gate_runner.py+script_gate_runner.py+integration_smoke.py(多阶段流水线+脚本Gate+外部集成冒烟) | contract_sop+contract_check.py(接口契约/防覆盖) | model_switch_sop+ab_test.py(模型AB切换) | incremental_converge_sop(补缺收敛) | task_workspace_sop | session_handoff_sop(跨会话交接) | long_task_autopilot_sop+long_task_autopilot.py(长任务自动推进)
+| pipeline_execution_sop+batch_runner.py+preflight_check.py+gate_runner.py+script_gate_runner.py+integration_smoke.py(多阶段流水线+脚本Gate+外部集成冒烟) | contract_sop+contract_check.py(接口契约/防覆盖) | model_switch_sop+ab_test.py(模型AB切换) | incremental_converge_sop(补缺收敛) | task_workspace_sop | session_handoff_sop(跨会话交接) | session_bot_isolation_sop | long_task_autopilot_sop+long_task_autopilot.py(长任务自动推进)
 P1飞书训练: 大题型MVP验收记录见L2
 L4: L4_raw_sessions/
 规则: rules_engine.md(红线+高频犯错, begin_reasoning必读)
