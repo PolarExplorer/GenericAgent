@@ -624,8 +624,8 @@
       "check_type": "pattern_forbidden",
       "params": {
         "scope": "tools",
-        "pattern": "(?:generate|image|图|画|生成).*(?:Trump|Biden|习近平|Musk|马斯克|特朗普|拜登|Obama|奥巴马|Taylor Swift|泰勒)",
-        "description": "图片生成prompt中禁止直接使用名人姓名"
+        "pattern": "(?:(?:generate|create|make|draw|paint|render|生成|绘制|画|做一张).{0,40}(?:Trump|Biden|习近平|Musk|马斯克|特朗普|拜登|Obama|奥巴马|Taylor Swift|泰勒).{0,40}(?:image|picture|photo|portrait|avatar|poster|illustration|图片|图像|照片|肖像|画像|头像|插画|海报)|(?:generate|create|make|draw|paint|render|生成|绘制|画|做一张).{0,40}(?:image|picture|photo|portrait|avatar|poster|illustration|图片|图像|照片|肖像|画像|头像|插画|海报).{0,40}(?:Trump|Biden|习近平|Musk|马斯克|特朗普|拜登|Obama|奥巴马|Taylor Swift|泰勒)|(?:Trump|Biden|习近平|Musk|马斯克|特朗普|拜登|Obama|奥巴马|Taylor Swift|泰勒).{0,40}(?:image|picture|photo|portrait|avatar|poster|illustration|图片|图像|照片|肖像|画像|头像|插画|海报))",
+        "description": "图片生成/绘制类 prompt 中禁止直接使用名人姓名；需同时出现明确视觉产物语义，避免文本精读/笔记类任务误触发。"
       },
       "severity": "medium"
     },
