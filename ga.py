@@ -765,6 +765,12 @@ class GenericAgentHandler(BaseHandler):
             if tool_name == 'no_tool': summary = "直接回答了用户问题"
             next_prompt += "\n[DANGER] 你遗漏了<summary>，必须按协议一直在每次回复中用<summary>中输出极简单行摘要！" 
         summary = smart_format(summary, max_str_len=100)
+        # Preserve numbered list items from response for context retention
+        _numbered = re.findall(r'^\d+[.、]\s*.+', _c, re.MULTILINE)
+        if _numbered:
+            _items = '; '.join(n.strip()[:60] for n in _numbered[:7])
+            if len(_items) > 200: _items = _items[:200] + '…'
+            summary += f' | 选项: {_items}'
         self.history_info.append(f'[Agent] {summary}')
         # === Session Event Logger (turn_end auto-record) ===
         try:
