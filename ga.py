@@ -12,7 +12,7 @@ from ga_dispatch_gate import DispatchGate
 from ga_coding_gate import CodingGate
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
-def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop_signal=[]):
+def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop_signal=None):
     """代码执行器
     python: 运行复杂的 .py 脚本（文件模式）
     powershell/bash: 运行单行指令（命令模式）
@@ -62,7 +62,7 @@ def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop
 
         while t.is_alive():
             istimeout = time.time() - start_t > timeout
-            if istimeout or len(stop_signal) > 0:
+            if istimeout or stop_signal:
                 process.kill()
                 print("[Debug] Process killed due to timeout or stop signal.")
                 if istimeout: full_stdout.append("\n[Timeout Error] 超时强制终止")
@@ -402,12 +402,13 @@ class GenericAgentHandler(BaseHandler):
         if not code:
             code = self._extract_code_block(response, code_type)
             if not code: return StepOutcome("[Error] Code missing. Must use reply code block or 'script' arg.", next_prompt="\n")
-        timeout = args.get("timeout", 60)
+        try: timeout = int(args.get("timeout", 60))
+        except: timeout = 60
         raw_path = os.path.join(self.cwd, args.get("cwd", './'))
         cwd = os.path.normpath(os.path.abspath(raw_path))
         code_cwd = os.path.normpath(self.cwd)
         if code_type == 'python' and args.get("inline_eval"):
-            ns = {'handler': self, 'parent': self.parent}
+            ns = {'handler':self, 'parent':self.parent, 'history':json.dumps(self.parent.llmclient.backend.history)}
             old_cwd = os.getcwd()
             try:
                 os.chdir(cwd)
@@ -507,10 +508,10 @@ class GenericAgentHandler(BaseHandler):
             if blocks: return blocks[-1].strip()
             return None
         
-        blocks = extract_robust_content(response.content)
-        if not blocks:
+        content = args.get('content') or extract_robust_content(response.content)
+        if not content:
             yield f"[Status] ❌ 失败: 未在回复中找到<file_content>代码块内容\n"
-            return StepOutcome({"status": "error", "msg": "No content found. Put content inside <file_content>...</file_content> tags in your reply body before call file_write."}, next_prompt="\n")
+            return StepOutcome({"status": "error", "msg": "No content found. Blank is not supported. Put content inside <file_content>...</file_content> tags in your reply body before call file_write."}, next_prompt="\n")
         try:
             new_content = expand_file_refs(blocks, base_dir=self.cwd)
             # ── ScriptGuard: validate memory/*.py before write ──
@@ -591,6 +592,11 @@ class GenericAgentHandler(BaseHandler):
         #next_prompt += '\n[SYSTEM TIPS] 此函数一般在任务开始或中间时调用，如果任务已成功完成应该是start_long_term_update用于结算长期记忆。\n'
         return StepOutcome({"result": "working key_info updated"}, next_prompt=next_prompt)
 
+    def _retry_or_exit(self, prompt):
+        self._empty_ct = getattr(self, '_empty_ct', 0) + 1
+        if self._empty_ct >= 3: return StepOutcome({}, should_exit=True)
+        return StepOutcome({}, next_prompt=prompt)
+
     def do_no_tool(self, args, response):
         '''这是一个特殊工具，由引擎自主调用，不要包含在TOOLS_SCHEMA里。
         当模型在一轮中未显式调用任何工具时，由引擎自动触发。
@@ -601,11 +607,11 @@ class GenericAgentHandler(BaseHandler):
             self._empty_ct = getattr(self, '_empty_ct', 0) + 1
             if self._empty_ct >= 3: return StepOutcome({}, should_exit=True)
             yield "[Warn] LLM returned an empty response. Retrying...\n"
-            return StepOutcome({}, next_prompt="[System] Blank response, regenerate and tooluse")
-        if len(content) > 50 and ('[!!! 流异常中断' in content[-100:] or '!!!Error:' in content[-100:]):
-            return StepOutcome({}, next_prompt="[System] Incomplete response. Regenerate and tooluse.")
+            return self._retry_or_exit("[System] Blank response, regenerate and tooluse")
+        if '[!!! 流异常中断' in content[-100:] or '!!!Error:' in content[-100:]:
+            return self._retry_or_exit("[System] Incomplete response. Regenerate and tooluse.")
         if 'max_tokens !!!]' in content[-100:]:
-            return StepOutcome({}, next_prompt="[System] max_tokens limit reached. Use multi small steps to do it.")
+            return self._retry_or_exit("[System] max_tokens limit reached. Use multi small steps to do it.")
         
         if self._in_plan_mode() and any(kw in content for kw in ['任务完成', '全部完成', '已完成所有', '🏁']):
             if 'VERDICT' not in content and '[VERIFY]' not in content and '验证subagent' not in content:
@@ -656,7 +662,7 @@ class GenericAgentHandler(BaseHandler):
 ''' + get_global_memory()
         yield "[Info] Start distilling good memory for long-term storage.\n"
         path = './memory/memory_management_sop.md'
-        if os.path.exists(path): result = '自动读取L0内容：\n' + file_read(path, show_linenos=False)
+        if os.path.exists(path): result = 'This is L0:\n' + file_read(path, show_linenos=False)
         else: result = "Memory Management SOP not found. Do not update memory."
         return StepOutcome(result, next_prompt=prompt)
 
@@ -687,7 +693,7 @@ class GenericAgentHandler(BaseHandler):
             try: print(prompt)
             except: pass
         return prompt
-
+    
     def turn_end_callback(self, response, tool_calls, tool_results, turn, next_prompt, exit_reason):
         # === Constraint Engine Monitor (接入点) ===
         try:

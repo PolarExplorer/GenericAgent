@@ -11,6 +11,7 @@ from agentmain import GeneraticAgent
 from chatapp_common import (
     AgentChatMixin, build_done_text, ensure_single_instance, extract_files,
     public_access, redirect_log, require_runtime, split_text, strip_files, clean_reply,
+
 )
 from llmcore import mykeys
 
@@ -26,8 +27,6 @@ ALLOWED = {str(x).strip() for x in mykeys.get("discord_allowed_users", []) if st
 USER_TASKS = {}
 MEDIA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "temp", "discord_media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
-
-
 class DiscordApp(AgentChatMixin):
     label, source, split_limit = "Discord", "discord", 1900
 
@@ -42,6 +41,7 @@ class DiscordApp(AgentChatMixin):
         self.background_tasks = set()
         self._channel_cache = OrderedDict()  # chat_id -> channel/user object (LRU, max 500)
 
+
         @self.client.event
         async def on_ready():
             print(f"[Discord] bot ready: {self.client.user} ({self.client.user.id})")
@@ -55,6 +55,7 @@ class DiscordApp(AgentChatMixin):
         if isinstance(message.channel, discord.DMChannel):
             return f"dm:{message.author.id}"
         return f"ch:{message.channel.id}"
+
 
     async def _download_attachments(self, message):
         """Download attachments/images to MEDIA_DIR, return list of local paths."""
@@ -115,6 +116,7 @@ class DiscordApp(AgentChatMixin):
         if not body and not files:
             await self.send_text(chat_id, "...", **ctx)
 
+
     async def _handle_message(self, message):
         # Ignore self
         if message.author == self.client.user or message.author.bot:
@@ -139,6 +141,7 @@ class DiscordApp(AgentChatMixin):
             print(f"[Discord] unauthorized user: {user_name} ({user_id})")
             return
 
+
         # Download attachments
         attachment_paths = await self._download_attachments(message)
 
@@ -154,7 +157,6 @@ class DiscordApp(AgentChatMixin):
         self._channel_cache[chat_id] = message.channel
         if len(self._channel_cache) > 500:
             self._channel_cache.popitem(last=False)
-
         print(f"[Discord] message from {user_name} ({user_id}, {'dm' if is_dm else 'guild'}): {content[:200]}")
 
         if content.startswith("/"):

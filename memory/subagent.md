@@ -3,18 +3,19 @@
 ## 文件IO协议
 
 - 目录：`temp/{task_name}/`（cwd在temp/时即`./{task_name}/`）
-- 启动：`python agentmain.py --task {name} [--input "短文本"] [--bg] [--llm_no N]`（cwd=代码根）
+- 启动：`python agentmain.py --task {name} [--input "短文本"] [--llm_no N]`（cwd=代码根）
 - `--input`自动建目录+清旧output+写input.txt；长文本先手动写input.txt再启动(不带--input)
-- 优先用`--bg`后台(print PID exit)，可同一code_run内sleep后poll；非--bg禁合并启动+轮询
+- 自动后台启动，print PID then exit
 - subagent的cwd还是temp，不是task目录
 - input：目标+约束即可，subagent同等智能。**禁写步骤/过度描述**，大量数据给路径
 - **精确prompt构造原则**：只传任务目标、边界约束、输入/输出文件绝对路径、完成定义；不传主agent冗长推理、无关背景、预设实现细节。让 subagent 自主选择最优路径，但明确它不能越界的边界。
 - **推荐输入结构**：`任务目标` / `成功判定` / `硬约束` / `输入文件` / `输出文件` / `已知风险或待确认点`
 - **推荐输出结构**：`结论` / `关键证据位置` / `未确定点` / `需要主agent决策的事项`
+- 可选fork功能（继承对话上下文）: code_run(inline_eval=True)，将变量history（自动注入,str）写入task目录下_history.json
 - 通信：output.txt(append,`[ROUND END]`=轮完成) → 写reply.txt继续 → 不写10min退出。reply后输出为output1/2/3.txt(同格式)
 - 干预文件：`_stop`(当轮结束退出) | `_keyinfo`(注入working memory) | `_intervene`(追加指令)
-- **主agent空闲时应读output观察进度，必要时用干预文件纠偏，禁止无脑长时间sleep轮询**
-- 监察模式启动时加`--verbose`，output将包含工具执行结果，主agent可直接审查原始数据而非仅信任摘要
+- 监察模式：**主agent空闲时应读output观察进度，必要时用干预文件纠偏，禁止无脑长时间sleep**
+- 若加`--verbose`，output将包含工具执行结果，主agent可直接审查原始数据而非仅信任摘要
 
 ## 场景1：测试模式 - 行为验证
 **用途**：观察agent真实行为，修正RULES/L2/L3/SOP
