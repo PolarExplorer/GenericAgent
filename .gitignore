@@ -124,3 +124,5 @@ reflect/*
 *.mvp*_backup
 
 .claude/
+debug_400_dump.json
+training_imgs/
