@@ -30,7 +30,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .panel h2 { font-size: 13px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; letter-spacing: 0.5px; }
 .left { grid-row: 3; grid-column: 1; }
 .right { grid-row: 3; grid-column: 2; }
-.bottom { grid-row: 4; grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); }
+.bottom { grid-row: 4; grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background: var(--border); }
 .constraint { background: var(--bg); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; border-left: 3px solid var(--green); font-size: 13px; }
 .constraint.fail { border-left-color: var(--red); }
 .constraint.skip { border-left-color: var(--border); }
@@ -130,6 +130,30 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
 .stop-modal-warn { color:var(--red); }
 .stop-modal-input { width:100%; margin-top:14px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-size:14px; }
 .stop-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+/* Brain-Dispatch panel */
+.bd-panel { background: var(--surface); overflow-y: auto; padding: 12px; }
+.bd-panel h2 { font-size: 13px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; letter-spacing: 0.5px; }
+.bd-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.bd-status-badge { padding:3px 8px; border-radius:4px; font-size:11px; font-weight:700; text-transform:uppercase; }
+.bd-status-badge.running { background:#0d2818; color:var(--green); border:1px solid var(--green); }
+.bd-status-badge.done { background:#102036; color:var(--accent); border:1px solid var(--accent); }
+.bd-status-badge.error { background:#2a1111; color:var(--red); border:1px solid var(--red); }
+.bd-status-badge.init { background:#1f2937; color:var(--text-dim); border:1px solid var(--border); }
+.bd-progress { width:100%; height:6px; background:var(--border); border-radius:3px; overflow:hidden; margin:6px 0; }
+.bd-progress .bd-fill { height:100%; background:var(--green); transition:width 0.5s; }
+.bd-task-list { margin-top:8px; }
+.bd-task { background:var(--bg); border-radius:6px; padding:6px 10px; margin-bottom:4px; font-size:12px; border-left:3px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.bd-task.active { border-left-color:var(--green); background:#0d1a14; }
+.bd-task.done { border-left-color:var(--accent); opacity:0.7; }
+.bd-task.error { border-left-color:var(--red); }
+.bd-task .bd-task-name { color:var(--text); font-weight:500; }
+.bd-task .bd-task-status { font-size:10px; color:var(--text-dim); }
+.bd-tool-log { margin-top:8px; max-height:100px; overflow-y:auto; }
+.bd-tool-entry { font-size:11px; color:var(--text-dim); padding:2px 0; border-bottom:1px solid var(--border); display:flex; gap:8px; }
+.bd-tool-entry .bd-tool-name { color:var(--purple); font-weight:600; }
+.bd-tool-entry .bd-tool-time { color:var(--text-dim); font-size:10px; }
+.bd-meta { font-size:11px; color:var(--text-dim); margin-top:4px; }
+.bd-offline { color:var(--text-dim); font-size:12px; text-align:center; padding:20px; }
 </style>
 </head>
 <body>
@@ -170,6 +194,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); co
   <div class="bottom">
     <div class="panel"><h2>🚨 违规记录</h2><div id="violations-list"><span style="color:var(--text-dim);font-size:13px">暂无违规</span></div></div>
     <div class="panel"><h2>🤖 子Agent调度</h2><div id="subagents-list"><span style="color:var(--text-dim);font-size:13px">暂无记录</span></div></div>
+    <div class="bd-panel"><h2>🧠 Brain-Dispatch</h2><div id="bd-container"><span class="bd-offline">未运行</span></div></div>
   </div>
 </div>
 <div class="stop-modal-overlay" id="stop-confirm-modal">
@@ -726,6 +751,57 @@ document.getElementById('task-select').addEventListener('change', (e) => {
 });
 setInterval(poll, POLL_MS);
 poll();
+
+// ─── Brain-Dispatch Status Polling ───────────────────────────────────────────
+let bdLastMtime = 0;
+async function pollBD() {
+  try {
+    const r = await fetch('bd_status.json?t=' + Date.now());
+    if (!r.ok) { renderBDOffline(); return; }
+    const bd = await r.json();
+    renderBD(bd);
+  } catch(e) { renderBDOffline(); }
+}
+function renderBDOffline() {
+  document.getElementById('bd-container').innerHTML = '<span class="bd-offline">Brain-Dispatch 未运行</span>';
+}
+function renderBD(bd) {
+  const c = document.getElementById('bd-container');
+  const statusCls = (bd.global_status || 'init').toLowerCase();
+  const pct = Math.round((bd.progress || 0) * 100);
+  let html = '<div class="bd-header">';
+  html += '<span class="bd-status-badge ' + statusCls + '">' + (bd.global_status || 'INIT') + '</span>';
+  if (bd.current_task) html += '<span style="color:var(--text);font-size:12px;font-weight:600">' + bd.current_task + '</span>';
+  if (bd.current_loop) html += '<span style="color:var(--text-dim);font-size:11px">Loop ' + bd.current_loop + '</span>';
+  if (bd.current_model) html += '<span style="color:var(--purple);font-size:11px">' + bd.current_model + '</span>';
+  html += '</div>';
+  html += '<div class="bd-progress"><div class="bd-fill" style="width:' + pct + '%"></div></div>';
+  html += '<div class="bd-meta">进度 ' + pct + '%';
+  if (bd.tokens_total) html += ' · Token: ' + (bd.tokens_total >= 1000 ? (bd.tokens_total/1000).toFixed(1) + 'k' : bd.tokens_total);
+  if (bd.updated) html += ' · 更新 ' + new Date(bd.updated).toLocaleTimeString();
+  html += '</div>';
+  // Task list
+  if (bd.tasks && bd.tasks.length) {
+    html += '<div class="bd-task-list">';
+    bd.tasks.forEach(t => {
+      const cls = t.status === 'running' ? 'active' : (t.status === 'done' ? 'done' : (t.status === 'error' ? 'error' : ''));
+      const tkn = t.tokens_est ? (t.tokens_est >= 1000 ? (t.tokens_est/1000).toFixed(1) + 'k' : t.tokens_est) + ' tok' : '';
+      html += '<div class="bd-task ' + cls + '"><span class="bd-task-name">' + (t.title || t.id) + '</span><span class="bd-task-status">' + (t.status || '') + (tkn ? ' · ' + tkn : '') + '</span></div>';
+    });
+    html += '</div>';
+  }
+  // Tool log (last 8)
+  if (bd.tool_log && bd.tool_log.length) {
+    html += '<div class="bd-tool-log">';
+    bd.tool_log.slice(-8).reverse().forEach(entry => {
+      html += '<div class="bd-tool-entry"><span class="bd-tool-name">' + (entry.tool || '') + '</span><span class="bd-tool-time">' + (entry.time || '') + '</span></div>';
+    });
+    html += '</div>';
+  }
+  c.innerHTML = html;
+}
+setInterval(pollBD, 3000);
+pollBD();
 </script>
 </body>
 </html>

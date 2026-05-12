@@ -9,6 +9,6 @@ call conda activate GenericAgent
 cd /d "D:\AI\GenericAgent"
 
 :: 启动
-python launch.pyw
+python launch.pyw --feishu --wecom
 
 pause

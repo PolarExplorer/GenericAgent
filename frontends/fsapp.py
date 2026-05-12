@@ -725,11 +725,14 @@ def handle_command(open_id, cmd, chat_id=None):
         if not agent.llmclient:
             return _send_cmd_response("❌ 当前没有可用的 LLM 配置")
         if len(parts) > 1:
+            if parts[1].lower() == 'auto':
+                agent.llm_locked = False; agent.baseline_llm_no = 0
+                return _send_cmd_response("🔓 已解锁，PreRouter恢复自动路由")
             try:
-                agent.next_llm(int(parts[1])); agent.baseline_llm_no = agent.llm_no
-                return _send_cmd_response(f"✅ 已切换到 [{agent.llm_no}] {agent.get_llm_name()}（已设为baseline）")
+                agent.next_llm(int(parts[1])); agent.baseline_llm_no = agent.llm_no; agent.llm_locked = True
+                return _send_cmd_response(f"✅ 已切换到 [{agent.llm_no}] {agent.get_llm_name()}（已锁定，PreRouter不再自动切换）")
             except Exception:
-                return _send_cmd_response(f"用法: /llm <0-{len(agent.list_llms()) - 1}>")
+                return _send_cmd_response(f"用法: /llm <0-{len(agent.list_llms()) - 1}> 或 /llm auto")
         lines = [f"{'→' if cur else '  '} [{i}] {name}" for i, name, cur in agent.list_llms()]
         _send_cmd_response("LLMs:\n" + "\n".join(lines))
     elif op == "/restore":

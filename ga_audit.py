@@ -794,9 +794,9 @@ def _extract_tokens(ctx, response):
     """Best-effort token extraction across OpenAI/Anthropic/GA budget shapes."""
     usage = _extract_usage(ctx, response)
     input_tokens = _first_value(
-        _get_nested(usage, ["input"]),
-        _get_nested(usage, ["input_tokens"]),
         _get_nested(usage, ["prompt_tokens"]),
+        _get_nested(usage, ["input_tokens"]),
+        _get_nested(usage, ["input"]),
         _get_nested(usage, ["prompt_token_count"]),
     ) or 0
     output_tokens = _first_value(

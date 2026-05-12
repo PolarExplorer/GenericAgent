@@ -181,11 +181,13 @@ def reset_conversation(agent, message='🆕 已开启新对话，当前上下文
             client.last_tools = ''
     if hasattr(agent, 'handler'):
         agent.handler = None
+    if hasattr(agent, 'llm_locked'):
+        agent.llm_locked = False
     return message
 
 def format_list(sessions, limit=20):
     if not sessions: return '❌ 没有可恢复的历史会话'
-    lines = ['**可恢复会话**（输入 `/continue N` 恢复第 N 个）：', '']
+    lines = ['**可手动跨会话恢复**（隔离默认开启；只有输入 `/continue N` 才会恢复第 N 个历史会话）：', '']
     for i, (_, mtime, first, n) in enumerate(sessions[:limit], 1):
         preview = _escape_md((first or '（无法预览）').replace('\n', ' ')[:60])
         lines.append(f'{i}. `{_rel_time(mtime)}` · **{n} 轮** · {preview}')

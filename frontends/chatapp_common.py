@@ -280,8 +280,8 @@ class AgentChatMixin:
                 return await self.send_text(chat_id, "❌ 当前没有可用的 LLM 配置", **ctx)
             if len(parts) > 1:
                 try:
-                    self.agent.next_llm(int(parts[1]))
-                    return await self.send_text(chat_id, f"✅ 已切换到 [{self.agent.llm_no}] {self.agent.get_llm_name()}", **ctx)
+                    self.agent.next_llm(int(parts[1])); self.agent.llm_locked = True
+                    return await self.send_text(chat_id, f"✅ 已切换到 [{self.agent.llm_no}] {self.agent.get_llm_name()}（已锁定）", **ctx)
                 except Exception:
                     return await self.send_text(chat_id, f"用法: /llm <0-{len(self.agent.list_llms()) - 1}>", **ctx)
             lines = [f"{'→' if cur else '  '} [{i}] {name}" for i, name, cur in self.agent.list_llms()]

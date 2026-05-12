@@ -137,6 +137,10 @@ def resolve_llm_no(agent, category):
 def pre_route(agent, raw_query, images=None, source='user'):
     """Main entry point. Classify query + switch model if needed.
     Returns (category, llm_no, note). Silent on all errors."""
+    # User manually locked model via /llm → skip auto-routing
+    if getattr(agent, 'llm_locked', False):
+        print(f'[PreRouter] skip: user_locked #{agent.llm_no}({agent.get_llm_name(model=True)})')
+        return None, agent.llm_no, 'skip:user_locked'
     global _last_category
     _last_category = None
     t0 = time.time()

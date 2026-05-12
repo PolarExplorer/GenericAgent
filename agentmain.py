@@ -47,9 +47,9 @@ class GenericAgent:
         self.history = []; self.handler = None; 
         self.task_queue = queue.Queue() 
         self.is_running = False; self.stop_sig = False
-        self.llm_no = 0;  self.baseline_llm_no = 0;  self.inc_out = False; self.verbose = True
-        self.peer_hint = True
-        self.log_path = os.path.join(script_dir, f'temp/model_responses/model_responses_{int(time.time()*1e6)%1000000:06d}.txt')
+        self.llm_no = 0;  self.baseline_llm_no = 0;  self.llm_locked = False;  self.inc_out = False; self.verbose = True
+        # Default isolation: do not suggest reading other sessions' logs unless explicitly enabled.
+        self.peer_hint = False
         self.load_llm_sessions()
 
     def load_llm_sessions(self):
@@ -138,7 +138,7 @@ class GenericAgent:
             self.history.append(f"[USER]: {rquery}")
             
             # Baseline regression: reset to user-chosen baseline before re-routing
-            if self.llm_no != self.baseline_llm_no:
+            if not self.llm_locked and self.llm_no != self.baseline_llm_no:
                 _old = f'#{self.llm_no}({self.get_llm_name(model=True)})'
                 self.next_llm(self.baseline_llm_no)
                 print(f'[PreRouter] reset {_old} → #{self.baseline_llm_no}({self.get_llm_name(model=True)})')

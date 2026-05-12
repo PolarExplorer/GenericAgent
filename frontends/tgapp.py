@@ -814,8 +814,8 @@ async def cmd_llm(update, ctx):
     if len(args) > 1:
         try:
             n = int(args[1])
-            agent.next_llm(n)
-            await update.message.reply_text(f"✅ 已切换到 [{agent.llm_no}] {agent.get_llm_name()}")
+            agent.next_llm(n); agent.llm_locked = True
+            await update.message.reply_text(f"✅ 已切换到 [{agent.llm_no}] {agent.get_llm_name()}（已锁定）")
         except (ValueError, IndexError):
             await update.message.reply_text(f"用法: /llm <0-{len(agent.list_llms())-1}>")
     else:

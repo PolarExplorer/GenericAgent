@@ -2,6 +2,7 @@ import os, json, re, time, requests, sys, threading, urllib3, base64, importlib,
 from datetime import datetime
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4())
+_SESSION_LOG_ID = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
 def _load_mykeys():
     global _mykey_path
@@ -1381,7 +1382,7 @@ def _write_llm_log(label, content, log_path=None):
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(log_path, 'a', encoding='utf-8', errors='replace') as f:
-        f.write(f"=== {label} === {ts}\n{content}\n\n")
+        f.write(f"=== {label} === {ts} session={_SESSION_LOG_ID}\n{content}\n\n")
 
 def tryparse(json_str):
     try: return json.loads(json_str)
