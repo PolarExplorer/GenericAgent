@@ -12,6 +12,29 @@ import traceback
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 
+# --- msg_id dedup to prevent duplicate processing (2026-05-11) ---
+_seen_msg_ids_lock = threading.Lock()
+_seen_msg_ids = {}  # msg_id -> timestamp
+_SEEN_MSG_TTL = 300  # 5 minutes
+
+
+def _is_duplicate_msg(msg_id):
+    """Return True if this msg_id was already processed recently."""
+    if not msg_id or msg_id == '?':
+        return False
+    now = time.time()
+    with _seen_msg_ids_lock:
+        # Cleanup old entries periodically
+        if len(_seen_msg_ids) > 500:
+            cutoff = now - _SEEN_MSG_TTL
+            expired = [k for k, v in _seen_msg_ids.items() if v < cutoff]
+            for k in expired:
+                del _seen_msg_ids[k]
+        if msg_id in _seen_msg_ids:
+            return True
+        _seen_msg_ids[msg_id] = now
+        return False
+
 _TAG_PATS = [r"<" + t + r">.*?</" + t + r">" for t in ("thinking", "summary", "tool_use", "file_content")]
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif"}
 _AUDIO_EXTS = {".opus", ".mp3", ".wav", ".m4a", ".aac"}
@@ -651,6 +674,10 @@ def handle_message(data):
             send_message(open_id, f"⚠️ 暂不支持处理此类飞书消息：{message.message_type}")
         return
     msg_id = getattr(message, 'message_id', '?')
+    # --- msg_id 去重：防止飞书重复投递/多实例重复处理 (2026-05-11) ---
+    if _is_duplicate_msg(msg_id):
+        print(f"[DEDUP] 跳过重复消息 (msg_id={msg_id}): {user_input[:100]}")
+        return
     create_time = getattr(message, 'create_time', '?')
     # 防重放：丢弃超过120秒的旧消息
     import time as _time
@@ -754,6 +781,16 @@ def handle_command(open_id, cmd, chat_id=None):
 
 def main():
     global client
+    # --- 单实例文件锁：防止多个 fsapp.py 同时运行 (2026-05-11) ---
+    lock_path = os.path.join(PROJECT_ROOT, 'temp', 'fsapp_instance.lock')
+    try:
+        import msvcrt
+        _instance_lock_fh = open(lock_path, 'w')
+        msvcrt.locking(_instance_lock_fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except (OSError, IOError):
+        print(f"[FATAL] 另一个 fsapp.py 实例已在运行（锁文件: {lock_path}），本进程退出。")
+        sys.exit(1)
+
     if not APP_ID or not APP_SECRET:
         print("错误: 请在 mykey.py 或 mykey.json 中配置 fs_app_id 和 fs_app_secret")
         sys.exit(1)

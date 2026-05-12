@@ -180,6 +180,15 @@ class AuditRegistryDetectionTest(unittest.TestCase):
                 self.assertTrue(matched, f"{rule_id} was not evaluated")
                 self.assertEqual(expected, matched[0]["status"])
 
+    def test_malformed_detection_string_is_skipped(self):
+        registry = {
+            "constraints": [{"id": "C999", "active": True, "detection": "engine-only-string"}],
+            "rules": [],
+        }
+        checks = _run_checks(registry, [{"name": "code_run", "args": {"script": "print(1)"}}], {})
+        matched = [check for check in checks if check["id"] == "C999"]
+        self.assertFalse(matched)
+
 
 class OnTurnEndR061Test(unittest.TestCase):
     """Verify R061 through real _on_turn_end → audit_log chain."""

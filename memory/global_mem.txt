@@ -45,7 +45,7 @@
 - 桌面文档默认位置: 用户要求以后凡是在桌面生成文档，默认放「桌面/AI产出/」；按需在其下建子目录分类(设计文档/微信素材/提取文档/生成图片等)；「桌面/AI学习/」只放外部学习资料(PDF/课件等)
 - Git: commit英文简洁 | git push等用户说 | 部署走项目自己的命令
 - 模型分发: 执行类子任务(编码/信息收集/数据处理)必须走subagent分发给肌肉模型，大脑只做规划决策验证。连续≥3轮同类执行→强制反思分发。详见model_dispatch_sop分发门
-- SOP/Skill同步: 以后凡新增或更新 `memory/*_sop.md` / `memory/*.py` 中的可用 Skill，必须同步到桌面 `GA_指令速查.md`，方便日后查阅
+- SOP/Skill同步: 以后凡新增或更新 `memory/*_sop.md` / `memory/*.py` 中的可用 Skill，必须同步到桌面 `GA_指令速查.md`，方便日后查阅；专家skill默认目录为 `D:\AI\GenericAgent\memory\skills\persona`
 - 类型化记忆治理: 已落地 `typed_memory_sop.md` + `typed_memory_utils.py`（分类/召回/冲突/新鲜度只读助手）+ `memory_conflict_scan.py`（重复/冲突/新鲜度/层混杂只读扫描，支持`--root`边界）
 
 ## [问题修复记录] <!-- updated: 2026-05-05 -->
@@ -183,6 +183,11 @@
 - 专家skill边界：用户线上反馈专家skill接入训练Bot主链路效果不好；当前策略是从知识底座/训练Bot主链路剥离，独立skill保留，需要时单独调用，避免persona覆盖考试证据。
 |- 题库审计门禁：`scripts/gate_check/gate6_check.py` 已接入 `audit_big_questions.py` 并挂到 `TASKS.yaml` 的 `t5_4_big_question_bank_audit`；对 `03_题库/big_questions_seed.jsonl` 验证 PASS，生成 `00_项目管理/big_questions_audit_report.json/.md`。
 
+## [Brain Dispatch /bd] <!-- updated: 2026-05-10 -->
+- brain_dispatch.py 已验证支持 SDD 执行前门禁：缺 constitution.md/spec.md/plan.md/tasks.md/validation.md 或缺 approval.md/--user-approved 时退出 42；py_compile 通过。
+- /bd 工作区模板入口: temp/bd_templates/sdd_workspace_template/，含 constitution/spec/experts/plan/tasks/validation/approval/README；辅助创建脚本 temp/bd_templates/new_bd_workspace.py。
+- 流程定位: gpt-5.5 负责大脑/专家skill选派/SDD把关，gpt-5.3-codex 或 deepseek-v4-flash 作为执行层；执行层只按已批准 tasks.md 操作。
+
 ## [Skill Struct Header SOP] <!-- added: 2026-05-08 -->
 - 文件: skill_struct_header_sop.md
 - 用途: 给高风险/高复用 SOP/Skill 增加轻量结构头（Trigger/Inputs/Outputs/Tools/Side effects/Risk/Schedule/Failure path/Review）
@@ -195,6 +200,7 @@
 - 核心原则: 反拟人(不角色扮演/不代表本人)、只抽象公开表达中反复出现的判断模式；高影响场景(金融/法律/医疗)降级为思考框架并提醒独立判断
 - 芒格MVP: 逆向思考、多元思维模型、长期主义、激励机制、能力圈、避免愚蠢；证据等级标注(强/中/弱/推测)
 - 触发: "蒸馏X" / "X视角" / "用X的方法看" / "让X帮我判断"
+- 默认专家skill目录: `D:\AI\GenericAgent\memory\skills\persona`
 
 ## [Project Context SOP] <!-- added: 2026-05-08 -->
 - 文件: project_context_sop.md

@@ -129,7 +129,7 @@ class GenericAgent:
     def run(self):
         while True:
             task = self.task_queue.get()
-            raw_query, source, display_queue = task["query"], task["source"], task["output"]
+            raw_query, source, display_queue, images = task["query"], task["source"], task["output"], task.get("images") or []
             raw_query = self._handle_slash_cmd(raw_query, display_queue)
             if raw_query is None:
                 self.task_queue.task_done(); continue
@@ -159,7 +159,7 @@ class GenericAgent:
                 handler.working['passed_sessions'] = ps = self.handler.working.get('passed_sessions', 0) + 1
                 if ps > 0: handler.working['key_info'] += f'\n[SYSTEM] 此为 {ps} 个对话前设置的key_info，若已在新任务，先更新或清除工作记忆。\n'
             self.handler = handler  # although new handler, the **full** history is in llmclient, so it is full history!
-            self.llmclient.log_path = self.log_path
+            self.llmclient.log_path = getattr(self, 'log_path', None)
             gen = agent_runner_loop(self.llmclient, sys_prompt, raw_query, 
                                 handler, TOOLS_SCHEMA, max_turns=70, verbose=self.verbose)
             try:

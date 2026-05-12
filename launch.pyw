@@ -21,6 +21,22 @@ def wait_for_local_port(port, host='127.0.0.1', timeout=20, poll_interval=0.2):
         time.sleep(poll_interval)
     return False
 
+def _is_bot_running(script_name):
+    """Check if a bot frontend (e.g. fsapp.py) is already running in another process."""
+    try:
+        import psutil
+        target = script_name.lower()
+        my_pid = os.getpid()
+        for p in psutil.process_iter(['pid', 'cmdline']):
+            if p.info['pid'] == my_pid:
+                continue
+            cmdline = p.info.get('cmdline') or []
+            if any(target in str(arg).lower() for arg in cmdline):
+                return True
+    except Exception:
+        pass
+    return False
+
 def get_screen_width():
     try: return ctypes.windll.user32.GetSystemMetrics(0)
     except: return 1920
@@ -132,31 +148,43 @@ if __name__ == '__main__':
     else: print('[Launch] QQ Bot not enabled (use --qq to start)')
 
     if args.feishu and not existing_instance:
-        fsproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "fsapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-        atexit.register(fsproc.kill)
-        print('[Launch] Feishu Bot started')
+        if _is_bot_running('fsapp.py'):
+            print('[Launch] Feishu Bot already running (daemon?), skipped')
+        else:
+            fsproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "fsapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            atexit.register(fsproc.kill)
+            print('[Launch] Feishu Bot started')
     elif args.feishu:
         print('[Launch] Feishu Bot start skipped because existing instance is reused')
     else: print('[Launch] Feishu Bot not enabled (use --feishu to start)')
 
     if args.wechat:
-        wxproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, 'wechatapp.py')], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-        atexit.register(wxproc.kill)
-        print('[Launch] WeChat Bot started')
+        if _is_bot_running('wechatapp.py'):
+            print('[Launch] WeChat Bot already running (daemon?), skipped')
+        else:
+            wxproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, 'wechatapp.py')], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            atexit.register(wxproc.kill)
+            print('[Launch] WeChat Bot started')
     else: print('[Launch] WeChat Bot not enabled (use --wechat to start)')
 
     if args.wecom and not existing_instance:
-        wcproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "wecomapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-        atexit.register(wcproc.kill)
-        print('[Launch] WeCom Bot started')
+        if _is_bot_running('wecomapp.py'):
+            print('[Launch] WeCom Bot already running (daemon?), skipped')
+        else:
+            wcproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "wecomapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            atexit.register(wcproc.kill)
+            print('[Launch] WeCom Bot started')
     elif args.wecom:
         print('[Launch] WeCom Bot start skipped because existing instance is reused')
     else: print('[Launch] WeCom Bot not enabled (use --wecom to start)')
 
     if args.dingtalk and not existing_instance:
-        dtproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "dingtalkapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-        atexit.register(dtproc.kill)
-        print('[Launch] DingTalk Bot started')
+        if _is_bot_running('dingtalkapp.py'):
+            print('[Launch] DingTalk Bot already running (daemon?), skipped')
+        else:
+            dtproc = subprocess.Popen([sys.executable, os.path.join(frontends_dir, "dingtalkapp.py")], creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            atexit.register(dtproc.kill)
+            print('[Launch] DingTalk Bot started')
     elif args.dingtalk:
         print('[Launch] DingTalk Bot start skipped because existing instance is reused')
     else: print('[Launch] DingTalk Bot not enabled (use --dingtalk to start)')

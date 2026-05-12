@@ -99,6 +99,37 @@ def should_stop():
     return os.path.exists(STOP_FILE)
 
 
+def kill_orphan_fsapp():
+    """启动新 fsapp.py 前，杀掉所有已存在的 fsapp.py 进程（防止孤儿进程导致重复处理）"""
+    my_pid = os.getpid()
+    try:
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-Command',
+             r"Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'fsapp\.py' -and $_.Name -match 'python' } | Select-Object ProcessId | ConvertTo-Json"],
+            capture_output=True, text=True, encoding='utf-8', errors='ignore',
+            creationflags=CREATE_NO_WINDOW, timeout=15
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return
+        import json
+        data = json.loads(result.stdout)
+        if isinstance(data, dict):
+            data = [data]
+        for item in data:
+            pid = item.get('ProcessId')
+            if pid and pid != my_pid:
+                try:
+                    subprocess.run(
+                        ['taskkill', '/F', '/PID', str(pid)],
+                        capture_output=True, creationflags=CREATE_NO_WINDOW, timeout=10
+                    )
+                    log.info(f'已杀死孤儿 fsapp.py 进程: PID={pid}')
+                except Exception as e:
+                    log.warning(f'杀死孤儿进程失败: PID={pid}, {e}')
+    except Exception as e:
+        log.warning(f'扫描孤儿进程失败: {e}')
+
+
 def clear_stop_file():
     try:
         if os.path.exists(STOP_FILE):
@@ -175,6 +206,7 @@ def run():
                     return
                 restart_times.clear()
 
+            kill_orphan_fsapp()
             log.info(f'启动 {APP_NAME}.py (pid will follow)')
             try:
                 with open(STDOUT_LOG, 'a', encoding='utf-8', buffering=1) as out:

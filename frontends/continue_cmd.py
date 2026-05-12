@@ -1,7 +1,26 @@
 """`/continue` command: list & restore past model_responses sessions.
 Pure functions + one `install(cls)` monkey-patch entry. No side effects at import.
 """
-import ast, glob, json, os, re, time
+import ast, glob, json, os, re, time, threading
+
+# --- Session list snapshot cache (per-caller key) ---
+# Prevents /continue N from re-sorting and picking a different session than shown.
+_session_cache_lock = threading.Lock()
+_session_cache = {}  # key -> (timestamp, sessions_list)
+_SESSION_CACHE_TTL = 300  # 5 minutes
+
+
+def _cache_sessions(key, sessions):
+    with _session_cache_lock:
+        _session_cache[key] = (time.time(), list(sessions))
+
+
+def _get_cached_sessions(key):
+    with _session_cache_lock:
+        entry = _session_cache.get(key)
+        if entry and (time.time() - entry[0]) < _SESSION_CACHE_TTL:
+            return list(entry[1])  # return a copy to prevent mutation
+    return None
 _LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         'temp', 'model_responses')
 _LOG_GLOB = os.path.join(_LOG_DIR, 'model_responses_*.txt')
@@ -216,20 +235,29 @@ def restore(agent, path):
     return f'⚠️ 非 native 格式，已降级恢复 {n} 轮摘要（{name}）\n(请输入新问题继续)', False
 
 def handle(agent, query, display_queue):
-    """Dispatch /continue or /continue N. Returns None if consumed else original query."""
+    """Dispatch /continue or /continue N. Returns None if consumed else original query.
+
+    Improvements (2026-05-11): snapshot cache + PID/filename resolve.
+    """
     s = (query or '').strip()
+    cache_key = f'handle_{os.getpid()}'
+
     if s == '/continue':
-        display_queue.put({'done': format_list(list_sessions(exclude_pid=os.getpid())), 'source': 'system'})
-        return None
-    m = re.match(r'/continue\s+(\d+)\s*$', s)
-    if m:
         sessions = list_sessions(exclude_pid=os.getpid())
-        idx = int(m.group(1)) - 1
-        if not (0 <= idx < len(sessions)):
-            display_queue.put({'done': f'❌ 索引越界（有效范围 1-{len(sessions)}）', 'source': 'system'})
+        _cache_sessions(cache_key, sessions)
+        display_queue.put({'done': format_list(sessions), 'source': 'system'})
+        return None
+
+    m = re.match(r'/continue\s+(\S+)\s*$', s)
+    if m:
+        arg = m.group(1)
+        sessions = _get_cached_sessions(cache_key) or list_sessions(exclude_pid=os.getpid())
+        path, err = _resolve_session_arg(arg, sessions)
+        if err:
+            display_queue.put({'done': err, 'source': 'system'})
             return None
         reset_conversation(agent, message=None)
-        msg, _ = restore(agent, sessions[idx][0])
+        msg, _ = restore(agent, path)
         display_queue.put({'done': msg, 'source': 'system'})
         return None
     return query
@@ -286,21 +314,68 @@ def extract_ui_messages(path):
     return out
 
 
+def _resolve_session_arg(arg, sessions):
+    """Resolve a /continue argument to a session path.
+
+    Supports:
+      - Numeric index: "2" → sessions[1]
+      - PID fragment:  "63992" → first session whose filename contains '63992'
+      - Filename:      "model_responses_63992.txt" → exact match
+
+    Returns (path, error_msg). Exactly one is non-None.
+    """
+    # 1) Pure small index (1-based, ≤ len)
+    if arg.isdigit():
+        idx = int(arg) - 1
+        if 0 <= idx < len(sessions):
+            return sessions[idx][0], None
+        # Maybe it's a PID that also looks like a number — fall through to fuzzy match
+        # but only if > len (to avoid ambiguity with real indices)
+        if int(arg) <= len(sessions):
+            return None, f'❌ 索引越界（有效范围 1-{len(sessions)}）'
+        # Treat as PID fragment
+        for path, *_ in sessions:
+            if arg in os.path.basename(path):
+                return path, None
+        return None, f'❌ 未找到包含 "{arg}" 的会话文件'
+
+    # 2) Filename or fragment
+    for path, *_ in sessions:
+        if arg == os.path.basename(path) or arg in os.path.basename(path):
+            return path, None
+    return None, f'❌ 未找到匹配 "{arg}" 的会话文件'
+
+
 def handle_frontend_command(agent, query, exclude_pid=None):
-    """Frontend-friendly /continue entry that returns text directly."""
+    """Frontend-friendly /continue entry that returns text directly.
+
+    Improvements (2026-05-11):
+    - /continue caches the session list; /continue N uses the cached snapshot
+    - Supports /continue <PID> and /continue <filename> for stable addressing
+    """
     s = (query or '').strip()
     exclude_pid = os.getpid() if exclude_pid is None else exclude_pid
+    cache_key = f'frontend_{exclude_pid}'
+
     if s == '/continue':
-        return format_list(list_sessions(exclude_pid=exclude_pid))
-    m = re.match(r'/continue\s+(\d+)\s*$', s)
+        sessions = list_sessions(exclude_pid=exclude_pid)
+        _cache_sessions(cache_key, sessions)
+        return format_list(sessions)
+
+    m = re.match(r'/continue\s+(\S+)\s*$', s)
     if not m:
-        return '用法: /continue 或 /continue N'
-    sessions = list_sessions(exclude_pid=exclude_pid)
-    idx = int(m.group(1)) - 1
-    if not (0 <= idx < len(sessions)):
-        return f'❌ 索引越界（有效范围 1-{len(sessions)}）'
+        return '用法: /continue 或 /continue <序号|PID|文件名>'
+
+    arg = m.group(1)
+    # Use cached snapshot if available; otherwise fresh list
+    sessions = _get_cached_sessions(cache_key) or list_sessions(exclude_pid=exclude_pid)
+    path, err = _resolve_session_arg(arg, sessions)
+    if err:
+        return err
+
+    name = os.path.basename(path)
     reset_conversation(agent, message=None)
-    msg, _ = restore(agent, sessions[idx][0])
+    msg, _ = restore(agent, path)
     return msg
 
 

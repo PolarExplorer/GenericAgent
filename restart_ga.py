@@ -82,43 +82,41 @@ def read_lock_pid(lock_file):
         return None
 
 
-def _wmic_python_process_rows():
-    """返回 python/pythonw 进程的原始 WMIC CSV 行。"""
+def get_python_process_table():
+    """获取 python/pythonw 进程表，字段：pid/ppid/cmd/raw。
+    使用 PowerShell Get-CimInstance 替代已弃用的 wmic。"""
+    rows = []
+    ps_cmd = (
+        'powershell -NoProfile -Command "'
+        "Get-CimInstance Win32_Process -Filter \\\"Name like 'python%'\\\" "
+        "| ForEach-Object { $_.ProcessId.ToString() + '|' + $_.ParentProcessId.ToString() + '|' + $_.CreationDate.ToString('yyyyMMddHHmmss') + '|' + ($_.CommandLine -replace '`n',' ') }"
+        '"'
+    )
     try:
         r = subprocess.run(
-            'wmic process where "Name like \'python%\'" get ProcessId,ParentProcessId,CreationDate,CommandLine /format:csv',
-            shell=True, capture_output=True, text=True,
+            ps_cmd, shell=True, capture_output=True, text=True,
             encoding="utf-8", errors="ignore",
-            creationflags=CREATE_NO_WINDOW, timeout=10,
+            creationflags=CREATE_NO_WINDOW, timeout=15,
         )
-        return [line for line in r.stdout.splitlines() if line.strip()]
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("|", 3)
+            if len(parts) < 4:
+                continue
+            pid_s, ppid_s, creation, cmd = parts
+            if not pid_s.strip().isdigit():
+                continue
+            rows.append({
+                "pid": int(pid_s.strip()),
+                "ppid": int(ppid_s.strip()) if ppid_s.strip().isdigit() else None,
+                "creation": creation.strip(),
+                "cmd": cmd.strip(),
+                "raw": line,
+            })
     except Exception:
-        return []
-
-
-def get_python_process_table():
-    """解析 python/pythonw 进程表，字段：pid/ppid/cmd/raw。"""
-    rows = []
-    for line in _wmic_python_process_rows():
-        if line.lower().startswith("node,") or "processid" in line.lower():
-            continue
-        parts = line.split(",")
-        if len(parts) < 5:
-            continue
-        pid_s = parts[-1].strip()
-        ppid_s = parts[-2].strip()
-        creation = parts[-3].strip()
-        # CommandLine 可能包含逗号；CSV 简化解析：去掉 Node 与末尾三列后拼回。
-        cmd = ",".join(parts[1:-3]).strip()
-        if not pid_s.isdigit():
-            continue
-        rows.append({
-            "pid": int(pid_s),
-            "ppid": int(ppid_s) if ppid_s.isdigit() else None,
-            "creation": creation,
-            "cmd": cmd,
-            "raw": line,
-        })
+        pass
     return rows
 
 
