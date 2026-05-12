@@ -11,6 +11,9 @@
 - Risk: 把“讲得简单”误当成“内容完整”；过度类比导致考试评分点缺失。
 - Failure path: 若解释涉及考试评分点，先调用 ruankao/xingce workflow 或读取原文；若证据不足，标注“待原文核验”。
 - Review: 对高影响输出，至少检查一次“是否覆盖定义、边界、例子、反例、考试得分点”。
+- Success Criteria: 输出含术语堆砌诊断、最小可理解解释、至少 1 个例子+1 个反例、显式知识缺口列表；面向考试时回收评分点关键词。
+- Evidence Anchor: 本文 `## Diagnostic Checklist` / `## Before / After Examples` / `## Call Template` / `## Minimal Acceptance` 为内部锚点；外部权威原文链接尚未绑定。
+- Last Verified: 2026-05-09（结构头只读审查；正文未改）。
 
 ## Anti-Personification Statement
 

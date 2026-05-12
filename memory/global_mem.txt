@@ -149,7 +149,7 @@
 - 异常安全: try/except+pass，与A(session_event_log)同pattern
 - 回滚: 删除L657-668即可完全恢复
 
-## [审计与Dashboard] <!-- updated: 2026-04-29 -->
+## [审计与Dashboard] <!-- updated: 2026-05-09 -->
 - 模块: ga_audit.py (agentmain.__init__自动install, 每turn记录审计事件到audit_log.json)
 - Dashboard: temp/dashboard/dashboard.html (ga_audit.install自动启动静态服务8765, 控制端口8766；隔离巡检先查端口归属，勿复用已被真实Bot占用的端口)
 - 功能: task_id隔离、turn日志、token统计、constraint_checks、/api/stop远程停止；stop隔离测试用动态空闲端口并核对runtime_ports
@@ -158,6 +158,7 @@
 - 快照同步: constraints_snapshot.json 含 registry+DSL 双源，124项(84 Auto / 40 Manual)
 - 前端约束面板: autoPool/manualPool 双分组，各显示违规/通过/未触发计数；_ensure_dashboard_assets自动同步assets→temp/dashboard（坑：手动改assets/audit_dashboard.html后需copy到temp/dashboard/dashboard.html或重启服务才生效）
 - 报告导出(搁置): ga_audit_report.py 已创建(collect_report_data+异步导出框架)，计划接gpt-image-2生成视觉摘要卡片，参考图风格为粉色系卡片化信息图，待用户需要时启用
+- Brain-Dispatch面板(2026-05-09): brain_dispatch.py写bd_status.json到temp/dashboard/（去掉独立8780 server），audit_dashboard.html底部新增🧠BD面板(3秒轮询)；展示全局状态/当前task/loop/model/进度条/tool日志/token消耗(全局+每task)；_bd_update()/_bd_task_status()/_bd_flush()三函数驱动状态写入
 
 ## [问题修复: tool_use/tool_result orphan 400] <!-- fixed: 2026-05-01 -->
 - 问题: trim裁剪history时可能删除assistant(tool_use)但保留user(tool_result)，导致API 400 invalid_request_error
@@ -178,4 +179,44 @@
 - 飞书CLI边界：当前 `lark-cli --as user` 发送会因 `need_user_authorization` 失败；P1真实验收若需用户身份消息，应请用户在群内直接发送文字答案。
 - 术语边界：P1训练机器人=飞书机器人应用；P1训练会话=当前用于训练的chat；P1训练群=之后把机器人拉入的正式群；`BLOCKED_CHATS` 屏蔽的是chat/会话/群，不是机器人应用。
 - 灰度观察入口：`D:\KnowledgeFoundation\00_项目管理\P1_连续灰度观察\` 已建立 Day0 台账与运行手册，观察优先、不改主链路。
+- 2026-05-08 续做指针：桌面待办 `C:\Users\ZhuanZ（无密码）\Desktop\AI产出\训练系统_明日待办_2026-05-08.md`；优先真实发送 `错题` 回归验证题干、选项内容、主观题答案展示。
+- 专家skill边界：用户线上反馈专家skill接入训练Bot主链路效果不好；当前策略是从知识底座/训练Bot主链路剥离，独立skill保留，需要时单独调用，避免persona覆盖考试证据。
+|- 题库审计门禁：`scripts/gate_check/gate6_check.py` 已接入 `audit_big_questions.py` 并挂到 `TASKS.yaml` 的 `t5_4_big_question_bank_audit`；对 `03_题库/big_questions_seed.jsonl` 验证 PASS，生成 `00_项目管理/big_questions_audit_report.json/.md`。
+
+## [Skill Struct Header SOP] <!-- added: 2026-05-08 -->
+- 文件: skill_struct_header_sop.md
+- 用途: 给高风险/高复用 SOP/Skill 增加轻量结构头（Trigger/Inputs/Outputs/Tools/Side effects/Risk/Schedule/Failure path/Review）
+- 适用: 调用工具/脚本/浏览器/凭证的SOP；跨会话频繁召回的Skill；新增高复用SOP时优先添加
+- 来源: arXiv 2604.24026 "Scheduling-Structural-Logical" 轻量吸收版
+
+## [Persona Distill SOP + Perspective Skill] <!-- added: 2026-05-08 -->
+- 文件: persona_distill_sop.md (流程) + munger_perspective_skill.md (MVP示例)
+- 用途: 把公开资料中人物的长期思考方式蒸馏成GA可复用的"认知框架 skill"
+- 核心原则: 反拟人(不角色扮演/不代表本人)、只抽象公开表达中反复出现的判断模式；高影响场景(金融/法律/医疗)降级为思考框架并提醒独立判断
+- 芒格MVP: 逆向思考、多元思维模型、长期主义、激励机制、能力圈、避免愚蠢；证据等级标注(强/中/弱/推测)
+- 触发: "蒸馏X" / "X视角" / "用X的方法看" / "让X帮我判断"
+
+## [Project Context SOP] <!-- added: 2026-05-08 -->
+- 文件: project_context_sop.md
+- 用途: 为代码项目创建/维护 `AGENTS.md`——给 AI/Agent 执行任务的地图(命令/结构/规则/验证)
+- 原则: AGENTS.md是地图不是百科；只放AI必须先知道的信息；细节链接到docs/脚本/源码；README给人看AGENTS给AI看
+- 触发: 新建/维护代码项目、项目上下文混乱、命令/验证流程不清时
+
+## [Session Bot Isolation SOP] <!-- added: 2026-05-08 -->
+- 文件: session_bot_isolation_sop.md
+- 用途: 多Bot会话/职责隔离规范
+- 核心: 按领域(domain)而非平台(platform)划分Bot；一个领域Bot可有多平台入口(飞书/微信)
+- 当前: GA=总控domain bot, 飞书训练=worker bot; 未来微信可路由到同一训练domain bot
+
+## [Task Analyzer Report SOP] <!-- added: 2026-05-08 -->
+- 文件: task_analyzer_report_sop.md
+- 用途: 复杂任务结束时生成轻量结构化后验分析报告(成功路径/失败路径/可复用经验/不应进LTM的临时信息)
+- 触发: 复杂多轮任务收尾、失败升级后收口、用户要求复盘
+- 价值: 避免只留聊天摘要难以复盘；避免失败路径反复踩坑；给trace2skill/debugging_sop提供证据节点
+
+## [Darwin Maintenance SOP] <!-- added: 2026-05-08 -->
+- 文件: darwin_maintenance_sop.md
+- 用途: SOP/Skill/规则/约束/L1-L3索引的持续维护元SOP
+- 核心机制: 单一资产(一次只改一个)、双重评估(只读基线+变更方案)、棘轮机制(只允许净改善)、独立评分(改前改后对比)、人在回路(高风险变更需用户确认)
+- 触发: "维护/优化/收敛/清理/升级"知识资产；规则误触发/SOP老化/Skill冲突/索引膨胀
 - 验收记录：`D:\KnowledgeFoundation\00_项目管理\2026-05-05_P1_大题型支持MVP验收记录.md`

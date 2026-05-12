@@ -2,20 +2,15 @@
 
 > 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
 
-**触发**：3步以上有依赖/多文件协同/条件分支/需并行 | **禁用**：1-2步简单任务直接做
-任务开始前必须先创建工作目录 `./plan_XXX/`（XXX=任务英文短名）
-单独使用一个code_run({'inline_eval':True, 'script':'handler.enter_plan_mode("./plan_XXX/plan.md")'})进入plan模式
+## 🔑速查
+- **触发**：3步以上有依赖/多文件协同/条件分支/需并行；**禁用**：1-2步简单任务直接做。
+- **进入**：创建 `./plan_XXX/`，再单独调用 `handler.enter_plan_mode("./plan_XXX/plan.md")`。
+- **探索**：主agent只建目录/匹配SOP/启动subagent/读结论；环境探测交给只读subagent。
+- **执行**：每轮先 `file_read(plan.md)` 找第一个 `[ ]`，完成后 `file_patch` 标 `[✓]` 并回读下一个。
+- **验证红线**：必须有 `[VERIFY]` 独立验证；0个 `[ ]` 残留且有工具证据后才可声称完成。
 
 **轻量替代 — 任务级状态文件（来源：GSD 文件驱动状态机，对抗 context rot）**：
-当任务不够复杂到触发 plan 模式，但预估 >10 轮时，在 `./` 下创建 `TASK_STATE.md` 持久化状态，弥补 Working Memory 200 token 限制。内容：
-```
-## 目标: (一句话)
-## 当前阶段: (正在做什么)
-## 已完成: (关键里程碑列表)
-## 待办: (剩余步骤)
-## 关键决策: (影响后续的选择及理由)
-```
-每完成一个子步骤 file_patch 更新。会话中断恢复时优先读此文件。任务结束后删除。
+任务未触发 plan 模式但预估 >10 轮时，在 `./TASK_STATE.md` 记录：目标 / 当前阶段 / 已完成 / 待办 / 关键决策。每完成一个子步骤 file_patch 更新；会话中断恢复时优先读；任务结束后删除。
 
 ---
 
@@ -103,44 +98,31 @@
 **plan.md格式**：
 
 ```markdown
-<!-- EXECUTION PROTOCOL (每轮必读，这是你的执行指南)
-1. file_read(plan.md)，找到第一个 [ ] 项
-2. 该步标注了SOP → file_read 该SOP的🔑速查段
-3. 执行该步骤 + Mini验证产出
-4. file_patch 标记 [ ] → [✓]+简要结果，然后回到步骤1继续下一个[ ]
-5. 所有步骤（包括验证步骤）标记完成后 → 终止检查：file_read(plan.md)确认0个[ ]残留
-⚠ 禁止凭记忆执行 | 禁止跳过验证步骤 | 禁止未经终止检查就结束 | 禁止停下来输出纯文字汇报
-💡 搬砖活（读大量代码/文件/网页/重复操作）优先委托subagent，保持主agent上下文干净
+<!-- EXECUTION PROTOCOL
+每轮：file_read(plan.md)找首个[ ] → 执行+Mini验证 → file_patch标[✓] → 回到首个[ ]。
+红线：读SOP速查；不凭记忆/不跳验证/不无证汇报；终止前确认0个[ ]；搬砖活优先subagent。
 -->
 # 任务标题
 需求：一句话 | 约束：关键限制
 
 ## 探索发现
-- 发现1：XXX（来源：file_read/web_scan/code_run）
-- 发现2：YYY
+- 发现：XXX（来源：file_read/web_scan/code_run）
 - 不确定点：ZZZ
 
 ## 执行计划
 1. [ ] 步骤1简述
    SOP: xxx_sop.md
-2. [D] 步骤2简述（委托subagent执行）
+2. [D] 步骤2简述（委托subagent；依赖：1）
    SOP: yyy_sop.md
-   依赖：1
 3. [P] 步骤3简述（并行，读subagent.md执行Map模式）
-   SOP: yyy_sop.md
-4. [?] 步骤4（条件分支）
-   SOP: (无) ← 高风险
+4. [?] 步骤4（条件分支；SOP: 无 ← 高风险）
    条件：X成功→4.1，否则→4.2
-
----
 
 ## 验证检查点
 N+1. [ ] **[VERIFY] 启动独立验证subagent**
      SOP: verify_sop.md plan_sop.md
-     操作：读plan_sop.md第四章内容 → 准备verify_context.json → 启动验证subagent → 读取VERDICT → 按结果处理
+     操作：读第四章 → 准备verify_context.json → 启动验证subagent → 读取VERDICT → 按结果处理
      ⚠ 不可跳过，不可在未启动subagent的情况下标记[✓]
-
----
 ```
 
 ### 步骤5：自检清单（主agent逐项检查）

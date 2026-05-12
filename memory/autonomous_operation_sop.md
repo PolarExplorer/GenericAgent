@@ -1,5 +1,16 @@
 # 自主行动 SOP
 
+## Struct Header
+- Trigger: 用户授权自主行动、定时任务触发、TODO队列非空时。
+- Inputs: TODO列表、autonomous_reports/history.txt、用户授权范围。
+- Outputs: 自主报告(RXX_描述.md)、history.txt更新、TODO状态变更。
+- Tools: autonomous_operation_sop.helper(set_todo/complete_task)。
+- Side effects: 写入autonomous_reports/、更新TODO、可能触发其他SOP。
+- Risk: R2。受限于"不对环境造成副作用"原则。
+- Failure path: 超出授权范围→停止并报告用户。
+- Review: 高风险操作需用户确认。
+
+
 > 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
 
 ⚠️ **路径警告**：autonomous_reports 在 temp/ 下，用`./autonomous_reports/`访问，**不是**`../memory/autonomous_reports/`或`../autonomous_reports/`！TODO在cwd下。

@@ -1,5 +1,16 @@
 # Vision API SOP
 
+## Struct Header
+- Trigger: 需要视觉理解屏幕/图片内容，且OCR/窗口标题无法满足时。
+- Inputs: 截图图片路径、问题/指令。
+- Outputs: 视觉分析结果文本。
+- Tools: vision_api.ask_vision, ljqCtrl(截图), ocr_utils(优先尝试)。
+- Side effects: 消耗多模态API token；截图写入临时文件。
+- Risk: R1。禁止全屏截图。
+- Failure path: 窗口不存在→不截图；OCR够用→不调vision。
+- Review: 无需特殊审查。
+
+
 > 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
 
 ## ⚠️ 前置规则（必须遵守）

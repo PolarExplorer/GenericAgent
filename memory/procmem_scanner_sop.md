@@ -1,5 +1,16 @@
 # Memory Scanner SOP
 
+## Struct Header
+- Trigger: 需要搜索进程内存特征码、字符串、数据模式时。
+- Inputs: 目标PID、搜索模式(hex/string)、可选YARA规则。
+- Outputs: 匹配地址列表、上下文数据(llm_mode时含周围字节)。
+- Tools: procmem_scanner.py(scan_memory函数)。
+- Side effects: 读取目标进程内存(ReadProcessMemory)；不修改任何进程数据。
+- Risk: R2。需要管理员权限；可能触发安全软件。
+- Failure path: 权限不足→提示提权；进程不存在→报错退出。
+- Review: 扫描系统进程前需用户确认。
+
+
 ## 1. 快速开始
 内存特征搜索工具，支持 Hex (CE 风格) 和 字符串匹配。特别提供 LLM 模式，方便大模型分析内存上下文。
 

@@ -1,3 +1,27 @@
+"""procmem_scanner.py — Process Memory Scanner (YARA + Hex/String patterns)
+
+Quick reference:
+    from procmem_scanner import scan_memory
+    results = scan_memory(pid, "48 8b ?? ?? 00", mode="hex", llm_mode=True)
+
+CLI:
+    python procmem_scanner.py --pid <PID> --pattern "xx xx" [--mode hex|string] [--llm]
+
+Role boundaries:
+    - READ-ONLY scanner: uses ReadProcessMemory, never writes to target process
+    - Requires admin privileges for protected processes
+    - Returns match addresses + context bytes (llm_mode adds surrounding data)
+
+Side-effect map:
+    - No file writes (results to stdout/return value)
+    - No process modification
+    - May trigger AV heuristics on memory read operations
+
+Governance:
+    - Owner: darwin_maintenance_sop
+    - Paired SOP: procmem_scanner_sop.md
+    - Risk: R2 (requires elevation; scan system processes needs user confirm)
+"""
 import ctypes
 import ctypes.wintypes
 import argparse

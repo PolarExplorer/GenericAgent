@@ -11,6 +11,9 @@
 - Risk: 把 Bloom 层级机械套用；把考试难度等同于认知层级；忽略具体学科和题型证据。
 - Failure path: 若题目内容或评分点不清，先读取考试 workflow/原文；若层级无法判定，输出“待题干/评分点核验”。
 - Review: 高影响题库调整前，至少检查“题干动作动词、证据要求、答案产物、评分标准”是否一致。
+- Success Criteria: 输出含层级标注、动作动词依据、产物形态、与评分点的对齐检查；高影响调整前列出至少 1 条层级争议或风险。
+- Evidence Anchor: 本文 `## Cognitive Level Checklist` / `## Decision Tree: Quick Classification` / `## Worked Examples` / `## Call Template` / `## Minimal Acceptance` 为内部锚点；Bloom 原始论文与 Anderson/Krathwohl 修订版尚未逐条绑定。
+- Last Verified: 2026-05-09（结构头只读审查；正文未改）。
 
 ## Anti-Personification Statement
 

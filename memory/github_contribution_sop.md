@@ -87,6 +87,14 @@ PR 提交后等 CI：
 - **改完后**：追加 commit + 测试 + push，不要 force push（除非 maintainer 要求 squash）
 - **reviewer 要求加测试** → 加，这不是可选项
 
+## 接手新项目（首次阅读）
+
+接手陌生项目时按此顺序建立上下文：
+1. **README → docs → 依赖文件**（package.json / pyproject.toml / go.mod）
+2. **入口文件** → 追数据流到核心逻辑
+3. **tests 目录** → 跑最小验证（`npm test` / `pytest`）
+4. 禁止大规模递归扫描；改代码前先写假设 + 验证方式
+
 ## 常见错误（避坑）
 
 | 错误 | 正确做法 |

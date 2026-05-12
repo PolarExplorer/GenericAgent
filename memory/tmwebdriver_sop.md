@@ -155,3 +155,10 @@ web_scan失败时按序排查（自动检测优先，用户参与放最后）：
 ③扩展没装？→读Chrome用户目录下`Secure Preferences`→`extensions.settings`中找`path`含`tmwd_cdp_bridge`的条目
   找到→扩展已装，排查其他原因；没找到→走web_setup_sop
 ④以上都正常仍连不上→请求用户协助
+
+## hCaptcha 处理
+
+- **禁止 JS/CDP 直接点击验证码**——会被检测。
+- 正确流程：vision API 定位验证码位置 → ljqCtrl 物理鼠标点击。
+- 失败后等待 ≥5s 再重试（频率过高会锁定）。
+- 多轮验证 / 拼图类验证 → 转人工处理。
