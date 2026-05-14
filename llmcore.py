@@ -650,6 +650,31 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
             err = f"\n\n[!!! 流异常中断 {type(e).__name__}: {e} !!!]" if streamed else f"!!!Error: {type(e).__name__}: {e}"
             yield err; return [{"type": "text", "text": err}]
 
+def _is_thinking_model(model_name):
+    """Detect if a model requires reasoning_content pass-back (thinking/reasoning mode)."""
+    ml = model_name.lower()
+    # Models known to require reasoning_content in history
+    return any(k in ml for k in ('mimo', 'minimax', 'deepseek-r', 'deepseek-reasoner', 'qwq'))
+
+def _adapt_reasoning_for_model(messages, model):
+    """Adapt reasoning_content fields in OAI-format messages based on target model capability.
+    
+    - Thinking models: ensure every assistant message has reasoning_content (empty string if missing)
+    - Non-thinking models: strip reasoning_content to avoid confusing the API
+    """
+    thinking = _is_thinking_model(model)
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        if thinking:
+            # Ensure field exists; API requires it even if empty
+            if "reasoning_content" not in msg:
+                msg["reasoning_content"] = ""
+        else:
+            # Strip reasoning_content for models that don't support it
+            msg.pop("reasoning_content", None)
+    return messages
+
 def _openai_stream(sess, messages):
     model, api_mode = sess.model, sess.api_mode
     ml = model.lower()
@@ -674,6 +699,7 @@ def _openai_stream(sess, messages):
     else:
         url = auto_make_url(sess.api_base, "chat/completions")
         if sess.system: messages = [{"role": "system", "content": sess.system}] + messages
+        _adapt_reasoning_for_model(messages, model)
         _stamp_oai_cache_markers(messages, model)
         payload = {"model": model, "messages": messages, "stream": sess.stream}
         if sess.stream: payload["stream_options"] = {"include_usage": True}
@@ -882,7 +908,9 @@ class BaseSession:
         self.model = cfg.get('model', '')
         self.context_win = cfg.get('context_win', 28000)
         self.history = []
-        self.lock = threading.Lock()
+        # RLock allows ask() error handling to call _heal_history() while the
+        # current turn still holds the session lock.
+        self.lock = threading.RLock()
         self.system = ""
         self.name = cfg.get('name', self.model)
         proxy = cfg.get('proxy')

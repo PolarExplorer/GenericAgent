@@ -3,10 +3,10 @@ ga_dispatch_gate.py - 分级硬门禁 for model_dispatch_sop
 Graduated enforcement: open → warning → forced reflection → hard block
 
 Thresholds (consecutive execution-tool turns without subagent dispatch):
-  Level 0 (0-4):   open
-  Level 1 (5-7):   soft warning - remind to reflect on dispatch
-  Level 2 (8-10):  semi-block - forced reflection template, still allows execution
-  Level 3 (11+):   hard block - refuse execution tools unless dispatching subagent
+  Level 0 (0-2):   open
+  Level 1 (3-4):   soft warning - remind to reflect on dispatch
+  Level 2 (5-6):   semi-block - forced reflection template, still allows execution
+  Level 3 (7+):    hard block - refuse execution tools unless dispatching subagent
 
 Reset conditions: user message / subagent call / ask_user / progress detected (halve)
 Light exec (tests, small patches) count as 0.5 weight.
@@ -185,14 +185,16 @@ class DispatchGate:
             # Read-only / planning turn - don't increment, but don't reset either
             return self.level, ""
 
-        # Pre-router muscle bypass: if pre_router already switched to a muscle
-        # model for this user message, the "brain" isn't doing exec work — skip.
-        try:
-            from ga_pre_router import get_last_category, MUSCLE_CATEGORIES
-            if get_last_category() in MUSCLE_CATEGORIES:
-                return self.level, ""
-        except Exception:
-            pass
+        # [2026-05-13] MUSCLE bypass REMOVED — Brain-Muscle architecture requires
+        # gate pressure to build even when pre_router switches model, so Brain
+        # is forced to delegate via subagent rather than executing directly.
+        # Original code:
+        # try:
+        #     from ga_pre_router import get_last_category, MUSCLE_CATEGORIES
+        #     if get_last_category() in MUSCLE_CATEGORIES:
+        #         return self.level, ""
+        # except Exception:
+        #     pass
 
         # P1: Whitelisted turn patterns bypass gate entirely (no increment)
         if self._is_whitelisted(tool_calls, response_text):
@@ -223,13 +225,13 @@ class DispatchGate:
 
         n = self.consecutive_exec
 
-        if n >= 11:
+        if n >= 7:
             self.level = 3
             return 3, _HARD_BLOCK_PROMPT.format(n=int(n))
-        elif n >= 8:
+        elif n >= 5:
             self.level = 2
             return 2, _SEMI_BLOCK_PROMPT.format(n=int(n))
-        elif n >= 5:
+        elif n >= 3:
             self.level = 1
             return 1, _WARN_PROMPT.format(n=int(n))
         else:

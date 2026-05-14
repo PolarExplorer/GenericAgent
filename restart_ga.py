@@ -28,6 +28,7 @@ COMPONENTS = {
     "fsapp": {
         "stop_file": os.path.join(TEMP_DIR, "fsapp_daemon.stop"),
         "lock_file": os.path.join(TEMP_DIR, "fsapp_daemon.lock"),
+        "instance_locks": [os.path.join(TEMP_DIR, "fsapp_instance.lock")],
         # 8765/8766 are shared local GA control/resource ports, also used by the
         # pywebview/Streamlit frontend.  They are NOT fsapp-owned health ports;
         # using them for stop/status can mis-detect fsapp or kill the frontend.
@@ -268,8 +269,9 @@ def stop_component(name, cfg, force=False):
     """优雅停止组件：stop_file → 等退出 → 安全兜底强杀。force=True 跳过活跃会话保护。"""
     log(f"[STOP] 停止 {name} {'(FORCE)' if force else ''} ...")
     protected_pids = pids_on_current_process_tree()  # 始终保护当前进程树
-    if not force:
-        protected_pids |= active_model_response_pids()  # 非 force 时保护活跃会话
+    # 重启场景不保护活跃会话——旧进程必须让位给新实例
+    # active_model_response 保护仅在非重启的 kill-only 场景有意义，但即便如此
+    # 也不应阻止 stop_component 杀掉目标组件自身的进程
     if protected_pids:
         log(f"[PROTECT] 当前保护 PID: {sorted(protected_pids)}")
 
@@ -294,11 +296,12 @@ def stop_component(name, cfg, force=False):
             log(f"daemon 未自行退出，尝试安全强杀 PID={daemon_pid}")
             kill_pid(daemon_pid, protected_pids, reason=f"{name}: daemon lock pid")
 
-    # 3) 兜底：按关键词 + 端口查找残留进程；命中保护名单时只记录不杀
+    # 3) 兜底：按关键词 + 端口查找残留进程
+    #    重启场景(force=True)下不保护活跃会话——旧进程必须让位给新实例
     remaining = find_pids_by_keyword(cfg["match_keywords"])
     remaining |= find_pids_on_ports(cfg["ports"])
     if remaining:
-        log(f"残留进程候选: {sorted(remaining)}，执行安全清理")
+        log(f"残留进程候选: {sorted(remaining)}，执行{'强制' if force else '安全'}清理")
         for pid in sorted(remaining):
             kill_pid(pid, protected_pids, reason=f"{name}: keyword/port cleanup")
 
@@ -320,6 +323,14 @@ def stop_component(name, cfg, force=False):
         try:
             if os.path.exists(f):
                 os.remove(f)
+        except Exception:
+            pass
+    # 5b) 清理组件注册的 instance_locks（如 fsapp_instance.lock）
+    for f in cfg.get("instance_locks", []):
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+                log(f"已清理 instance lock: {os.path.basename(f)}")
         except Exception:
             pass
 

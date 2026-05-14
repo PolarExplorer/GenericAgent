@@ -1,14 +1,30 @@
 @echo off
 chcp 65001 >nul
-title GenericAgent 启动器
+title GenericAgent Launcher
 
-:: 激活 conda agent 环境
-call conda activate GenericAgent
+:: Enter GenericAgent directory
+cd /d "%~dp0"
 
-:: 进入 GenericAgent 目录（请修改为你实际的路径）
-cd /d "D:\AI\GenericAgent"
+echo.
+echo  ==============================
+echo    GenericAgent Frontend Select
+echo  ==============================
+echo    1. Feishu + WeCom  (launch.pyw, conda: GenericAgent)
+echo    2. TUI Terminal    (tuiapp_v2, conda: LangChain)
+echo  ==============================
+echo.
+set /p choice="Please choose [1/2]: "
 
-:: 启动
-python launch.pyw --feishu --wecom
+if "%choice%"=="2" (
+    echo Activating conda env: LangChain
+    call conda activate LangChain
+    echo Starting TUI frontend...
+    python frontends\tuiapp_v2.py
+) else (
+    echo Activating conda env: GenericAgent
+    call conda activate GenericAgent
+    echo Starting Feishu + WeCom frontend...
+    python launch.pyw --feishu --wecom
+)
 
 pause

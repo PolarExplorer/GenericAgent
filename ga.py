@@ -514,7 +514,7 @@ class GenericAgentHandler(BaseHandler):
             yield f"[Status] ❌ 失败: 未在回复中找到<file_content>代码块内容\n"
             return StepOutcome({"status": "error", "msg": "No content found. Blank is not supported. Put content inside <file_content>...</file_content> tags in your reply body before call file_write."}, next_prompt="\n")
         try:
-            new_content = expand_file_refs(blocks, base_dir=self.cwd)
+            new_content = expand_file_refs(content, base_dir=self.cwd)
             # ── ScriptGuard: validate memory/*.py before write ──
             try:
                 from script_guard import validate_python_write as _sg_validate

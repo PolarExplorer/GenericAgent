@@ -84,7 +84,10 @@ class GenericAgent:
         self.llm_no = ((self.llm_no + 1) if n < 0 else n) % len(self.llmclients)
         lastc = self.llmclient
         self.llmclient = self.llmclients[self.llm_no]
-        try: self.llmclient.backend.history = lastc.backend.history
+        try:
+            self.llmclient.backend.history = list(lastc.backend.history)
+            if hasattr(self.llmclient.backend, 'heal'):
+                self.llmclient.backend.heal()
         except: raise Exception('[ERROR] BAD Mixin config: Check your mykey.py')
         self.llmclient.last_tools = ''
         name = self.get_llm_name(model=True)
@@ -134,6 +137,7 @@ class GenericAgent:
             if raw_query is None:
                 self.task_queue.task_done(); continue
             self.is_running = True
+            self._last_activity = time.time()  # heartbeat: 任务开始
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             
@@ -165,6 +169,7 @@ class GenericAgent:
             try:
                 full_resp = ""; last_pos = 0
                 for chunk in gen:
+                    self._last_activity = time.time()  # heartbeat: 每次LLM返回chunk
                     if consume_file(self.task_dir, '_stop'): self.abort() 
                     if self.stop_sig: break
                     full_resp += chunk
@@ -205,6 +210,7 @@ if __name__ == '__main__':
     parser.add_argument('--llm_no', type=int, default=0)
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--nobg', action='store_true')
+    parser.add_argument('--once', action='store_true', help='单轮执行后立即退出，不等待reply.txt')
     args, _unknown = parser.parse_known_args()
     _reflect_args = dict(zip([k.lstrip('-') for k in _unknown[::2]], _unknown[1::2])) if _unknown else {}
 
@@ -240,6 +246,7 @@ if __name__ == '__main__':
                     with open(f'{d}/output{nround}.txt', 'w', encoding='utf-8') as f: f.write(item.get('next', ''))
             with open(f'{d}/output{nround}.txt', 'w', encoding='utf-8') as f: f.write(item['done'] + '\n\n[ROUND END]\n')
             consume_file(d, '_stop')  # 已经成功停下来了，避免打断下次reply
+            if args.once: break  # 单轮执行后立即退出
             for _ in range(300):  # 等reply.txt，10分钟超时
                 time.sleep(2)
                 if (raw := consume_file(d, 'reply.txt')): break

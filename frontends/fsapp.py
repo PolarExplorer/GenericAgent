@@ -714,10 +714,20 @@ def handle_message(data):
                     card.fail("已停止")
                     break
                 if time.time() - start > AGENT_TIMEOUT_SEC:
-                    print(f"[FSAPP_TIMEOUT_900s] open_id={open_id} elapsed={time.time()-start:.0f}s limit={AGENT_TIMEOUT_SEC}s", flush=True)
-                    agent.abort()
-                    card.fail("任务超时")
-                    break
+                    # 心跳续命：检查 agent 最近活动时间，仍活跃则不杀
+                    last_active = getattr(agent, '_last_activity', start)
+                    idle = time.time() - last_active
+                    if idle > 300:  # 5分钟无任何活动才判定真超时
+                        print(f"[FSAPP_TIMEOUT] open_id={open_id} elapsed={time.time()-start:.0f}s idle={idle:.0f}s → abort", flush=True)
+                        agent.abort()
+                        card.fail(f"任务超时（空闲{idle:.0f}s无活动）")
+                        break
+                    else:
+                        # 仍有活动，续命，每60秒更新一次卡片状态（只改header，不加turn）
+                        elapsed = int(time.time() - start)
+                        if elapsed % 60 < 4:  # 约每60秒更新一次（循环3秒一次）
+                            card.status = f"⏳ 运行中 {elapsed}s（活跃）"
+                            card._push()
         except Exception as e:
             traceback.print_exc()
             card.fail(f"错误: {e}")
