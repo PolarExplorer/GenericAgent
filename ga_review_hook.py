@@ -99,9 +99,9 @@ def run_review(working, parent):
         "- Task ordering sensible?\n\n"
         "## Output format (concise):\n"
         "VERDICT: PASS | INCOMPLETE | REALIGN_NEEDED\n"
-        "SPEC_GAPS: (missing/weak elements from section 1, or None)\n"
-        "BLIND_SPOTS: (from section 3, or None)\n"
-        "DRIFT: (from section 4, or None)\n"
+        "SPEC_GAPS (spec.md\u6587\u6863\u7f3a\u5931/\u8584\u5f31\u9879): (missing/weak elements from section 1, or None)\n"
+        "BLIND_SPOTS (\u9886\u57df\u76f2\u533a\uff0c\u672a\u5b9a\u4e49\u5bfc\u81f4\u5b9e\u65bd\u8005\u9700\u731c\u6d4b): (from section 3, or None)\n"
+        "DRIFT (\u6267\u884c\u504f\u79bb\uff0ctasks\u5b9e\u9645\u8fdb\u5ea6\u4e0espec\u76ee\u6807\u4e0d\u4e00\u81f4): (from section 4, or None)\n"
         "RECOMMENDATION: (max 3 actionable bullets to improve the documents)\n"
     )
 
