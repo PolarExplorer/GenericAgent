@@ -28,9 +28,10 @@
 - 图片生成备用: `codex -i 图片路径 "prompt"` (非exec模式，有image_gen工具)
 
 ## [用户偏好与协作原则] <!-- updated: 2026-04-25 -->
-- 身份: 用户体验设计师出身，非程序员。用Agent做开发产品+知识管理。重复3遍的事→AI化/自动化
+- 身份: 用户体验设计师出身，非程序员，极简主义。用Agent做开发产品+知识管理。重复3遍的事→AI化/自动化
 - 技术决策: 说「为什么」和「对用户的影响」，不要只讲实现
 - 第一性原理: 从问题本质出发，不因惯例照搬。回到问题本身→要解决什么→最直接路径→从零设计会怎么做
+- 极简主义: 方案越简单越好，禁止过度分层/抽象。能一层解决不加第二层，能直接做不绕路
 - 反谄媚: 禁夸想法好/禁「这是个很好的问题」/禁「当然可以」开头。给真实判断，方案有问题直接指出，发现更好做法直接说
 - 约束先行: 新项目先写规范，新目录先定结构约定。没有规范不动手。需调整规范→先改文档再改实践
 - 交互设计最高准则: 用户体验优先级 > 技术偏好/代码整洁/架构优雅。用户触碰的每一层必须丝滑
@@ -60,6 +61,8 @@
 - **history错误消息累积致session不可恢复** (2026-05-01): API错误(400/500等)产生的`!!!Error`消息残留在history中，后续ask()携带脏history反复触发错误形成死循环。四处修改: A._openai_stream空input提前guard返回错误而非发请求; B.BaseSession.ask错误时自动调heal()清理history; C._heal_history从只pop尾部改为**全量扫描过滤**(原实现只while pop末尾，中间夹杂的错误消息无法清除); D.MixinSession fallback全失败时heal所有子session。验证: 5项单元测试+3项端到端实测(正常ask/注入错误恢复/heal直接清理)全PASS。教训: **history清理必须全量扫描不能只处理尾部**；错误恢复机制应在ask层自动触发而非依赖外部调用
 - **约束引擎误报: C031-WM-BEFORE-LTM + R040** (2026-05-05): ①C031 lookback=5太窄，memory连续patch场景5轮内无checkpoint但实际有→误报。修复: lookback 5→15 ②R040对任何file_patch/file_write代码文件触发"改完代码跑test"，小patch(1行bugfix)也被误报。修复: DSL加min_content_length:500，引擎_check_precondition增加内容长度过滤(<阈值skip)。验证: 4项测试PASS(小编辑skip/大编辑fail/窗口内有checkpoint pass/无checkpoint fail)。教训: **precondition类规则需区分操作规模，小改动不应触发重量级要求**；DSL顶层为dict结构非list
 - **file_read默认窗口治理** (2026-05-06): 为降低上下文噪声，`file_read.count` 默认从200降到120，硬上限300，并在 PARTIAL 输出提示优先 keyword 或 start+count 续读；同步更新中英文schema与smoke测试。验证: `test_ga_smoke.py`、schema JSON/default检查、LLM1审查(PASS_WITH_RISK无阻塞)、提交`8a94ecd`后短观察样本420行通过默认/续读/keyword/超大count截断，仓库干净。教训: 高频读文件工具优先用默认窗口+续读提示降噪，不继续扩大上下文压缩复杂度。
+- **中文写入策略** (2026-05-15): file_write/file_patch工具参数中的中文会被runtime截断为乱码(U+FFFD)。唯一可靠路径: file_write写含unicode escape的.py脚本→code_run exec执行，由Python解码写入目标文件。已在Bloom/Fowler/Feynman三轮验证通过。
+- **多行插入倒序策略** (2026-05-15): 对同一文件多处插入时，必须按anchor_line降序处理，否则前面的插入会导致后续行号偏移。模式: JSON定义entries(含anchor_line)→insert脚本按anchor降序排列→逐条插入。已在Fowler(12条)/Feynman(8条)验证通过。
 
 ## [GitHub] <!-- updated: 2026-04-25 -->
 - 用户: PolarExplorer, Token: mykey.py GITHUB_TOKEN (ghp_开头, scopes: repo+read:org)
@@ -133,6 +136,15 @@
 - 异常安全: try/except包裹，引擎异常不影响主流程
 - 坑点: load_constraints必须传path参数（__file__相对构建），不能无参调用
 - **误报修复 (2026-05-05)**: C031-WM-BEFORE-LTM lookback 5→15（原窗口太窄，memory patch场景5轮不够）; R040加min_content_length:500（小patch如1行bugfix不应触发"改完代码跑test"）; 引擎_check_precondition增加min_content_length过滤逻辑; DSL顶层为dict需用dsl["constraints"]访问规则数组; 4项测试全部通过
+
+## [Review Hook (ga_review_hook.py)] <!-- added: 2026-05-16 -->
+- 模块: ga_review_hook.py (track_project_root + run_review)
+- 接入点: ga.py turn_end_callback L832-840 (hooks后, return前)
+- 触发: exit_reason==CURRENT_TASK_DONE 且 working['project_root']存在
+- 机制: 每轮扫tool_calls文件路径→向上搜spec.md→存project_root；任务完成时读spec.md+tasks.md→组装SDD审查prompt(4段: Spec结构7要素+Tasks一致性+领域盲区补全+漂移检查)→llmclients[2](Opus) raw_ask→打印裁决+写review_latest.md
+- 裁决: PASS / INCOMPLETE / REALIGN_NEEDED (输出含SPEC_GAPS/BLIND_SPOTS/DRIFT/RECOMMENDATION)
+- 异常安全: try/except包裹，失败不影响主流程；Opus不可用时安全降级返回None
+- 测试: 11/11单元测试通过(prompt升级后重新验证)
 
 ## [session_event_log ga.py接入] <!-- updated: 2026-05-02 -->
 - 接入点: ga.py turn_end_callback L645-656 (summary记录后, hooks前)
