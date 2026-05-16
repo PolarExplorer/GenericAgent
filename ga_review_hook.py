@@ -56,19 +56,19 @@ def run_review(working, parent):
         return None
 
     with open(spec_path, 'r', encoding='utf-8', errors='replace') as f:
-        spec_content = f.read()[:60000]
+        spec_content = f.read()
     tasks_content = ''
     if os.path.isfile(tasks_path):
         with open(tasks_path, 'r', encoding='utf-8', errors='replace') as f:
-            tasks_content = f.read()[:15000]
+            tasks_content = f.read()
     plan_content = ''
     if os.path.isfile(plan_path):
         with open(plan_path, 'r', encoding='utf-8', errors='replace') as f:
-            plan_content = f.read()[:15000]
+            plan_content = f.read()
     trace_content = ''
     if os.path.isfile(trace_path):
         with open(trace_path, 'r', encoding='utf-8', errors='replace') as f:
-            trace_content = f.read()[:15000]
+            trace_content = f.read()
 
     # Get Opus session (llm_no=2) for isolated call
     try:
