@@ -107,7 +107,7 @@ def run_review(working, parent):
 
     try:
         print("[ReviewHook] Calling Opus for isolated review...")
-        msgs = [{"role": "user", "content": review_prompt}]
+        msgs = [{"role": "user", "content": [{"type": "text", "text": review_prompt}]}]
         review_result = "".join(opus_session.raw_ask(msgs))
 
         # Save
