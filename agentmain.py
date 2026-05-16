@@ -127,6 +127,21 @@ class GenericAgent:
             return None
         if raw_query.strip() == '/resume':
             return r'帮我看看最近有哪些会话可以恢复。读model_responses/目录，按修改时间取最近10个文件，从每个文件里找最后一个<history>...</history>块，用一句话总结每个会话在聊什么，列表给我选。注意读文件后要把字面的\n替换成真换行才能正确匹配。'
+        if raw_query.strip().startswith('/review-SDD'):
+            parts = raw_query.strip().split(None, 1)
+            working = getattr(self.handler, 'working', {}) if self.handler else {}
+            if len(parts) > 1:
+                working = dict(working); working['project_root'] = parts[1].strip()
+            if not working.get('project_root'):
+                display_queue.put({'done': '\u274c No project_root detected. Usage: /review-SDD <path_to_project>', 'source': 'system'})
+                return None
+            try:
+                from ga_review_hook import run_review
+                result = run_review(working, self)
+                display_queue.put({'done': result or '\u274c Review failed (spec.md not found or Opus unavailable)', 'source': 'system'})
+            except Exception as e:
+                display_queue.put({'done': f'\u274c Review error: {e}', 'source': 'system'})
+            return None
         return raw_query
 
     def run(self):
