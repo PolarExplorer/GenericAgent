@@ -48,17 +48,27 @@ def run_review(working, parent):
 
     spec_path = os.path.join(project_root, 'spec.md')
     tasks_path = os.path.join(project_root, 'tasks.md')
+    plan_path = os.path.join(project_root, 'plan.md')
+    trace_path = os.path.join(project_root, 'traceability_matrix.md')
 
     if not os.path.isfile(spec_path):
         print(f"[ReviewHook] spec.md not found at {spec_path}, skip.")
         return None
 
     with open(spec_path, 'r', encoding='utf-8', errors='replace') as f:
-        spec_content = f.read()[:8000]
+        spec_content = f.read()[:60000]
     tasks_content = ''
     if os.path.isfile(tasks_path):
         with open(tasks_path, 'r', encoding='utf-8', errors='replace') as f:
-            tasks_content = f.read()[:8000]
+            tasks_content = f.read()[:15000]
+    plan_content = ''
+    if os.path.isfile(plan_path):
+        with open(plan_path, 'r', encoding='utf-8', errors='replace') as f:
+            plan_content = f.read()[:15000]
+    trace_content = ''
+    if os.path.isfile(trace_path):
+        with open(trace_path, 'r', encoding='utf-8', errors='replace') as f:
+            trace_content = f.read()[:15000]
 
     # Get Opus session (llm_no=2) for isolated call
     try:
@@ -76,9 +86,11 @@ def run_review(working, parent):
 
     review_prompt = (
         "You are an independent SDD document reviewer. You have NO conversation history.\n"
-        "Your job: audit spec/tasks/plan completeness and quality, then check alignment.\n\n"
+        "Your job: audit spec/tasks/plan/traceability completeness and cross-document alignment.\n\n"
         "## spec.md:\n" + spec_content + "\n\n"
         "## tasks.md:\n" + (tasks_content or "(not found)") + "\n\n"
+        "## plan.md:\n" + (plan_content or "(not found)") + "\n\n"
+        "## traceability_matrix.md:\n" + (trace_content or "(not found)") + "\n\n"
         "## 1. Spec Structure (7 elements) - check each:\n"
         "- Problem Statement: clear, unambiguous, single interpretation?\n"
         "- Success Metrics: quantifiable, testable?\n"
@@ -91,17 +103,27 @@ def run_review(working, parent):
         "- Do tasks map to spec objectives?\n"
         "- Progress markers accurate?\n"
         "- Any spec requirements missing from tasks?\n\n"
-        "## 3. Domain blind-spot detection:\n"
+        "## 3. Plan alignment:\n"
+        "- Does plan.md phases/milestones match spec scope?\n"
+        "- Are phase dependencies logical?\n"
+        "- Does task ordering in tasks.md follow plan phases?\n\n"
+        "## 4. Traceability check:\n"
+        "- Does traceability_matrix.md cover ALL spec requirements?\n"
+        "- Any spec requirement with no corresponding task?\n"
+        "- Any task with no spec requirement (orphan work)?\n\n"
+        "## 5. Domain blind-spot detection:\n"
         "Based on the project goals and context described in spec.md, identify key dimensions\n"
         "that SHOULD be defined but are NOT — things whose absence forces the implementer to guess.\n\n"
-        "## 4. Drift check:\n"
+        "## 6. Drift check:\n"
         "- Any completed work that doesn't serve stated objectives?\n"
         "- Task ordering sensible?\n\n"
         "## Output format (concise):\n"
         "VERDICT: PASS | INCOMPLETE | REALIGN_NEEDED\n"
-        "SPEC_GAPS (spec.md\u6587\u6863\u7f3a\u5931/\u8584\u5f31\u9879): (missing/weak elements from section 1, or None)\n"
-        "BLIND_SPOTS (\u9886\u57df\u76f2\u533a\uff0c\u672a\u5b9a\u4e49\u5bfc\u81f4\u5b9e\u65bd\u8005\u9700\u731c\u6d4b): (from section 3, or None)\n"
-        "DRIFT (\u6267\u884c\u504f\u79bb\uff0ctasks\u5b9e\u9645\u8fdb\u5ea6\u4e0espec\u76ee\u6807\u4e0d\u4e00\u81f4): (from section 4, or None)\n"
+        "SPEC_GAPS (spec.md\u6587\u6863\u7f3a\u5931/\u8584\u5f31\u9879): (from section 1, or None)\n"
+        "PLAN_ALIGNMENT (plan\u4e0espec/tasks\u7684\u5bf9\u9f50\u95ee\u9898): (from section 3, or None)\n"
+        "TRACEABILITY (\u9700\u6c42\u8ffd\u6eaf\u7f3a\u53e3\uff0cspec\u9700\u6c42\u672a\u88ab\u4efb\u52a1\u8986\u76d6): (from section 4, or None)\n"
+        "BLIND_SPOTS (\u9886\u57df\u76f2\u533a\uff0c\u672a\u5b9a\u4e49\u5bfc\u81f4\u5b9e\u65bd\u8005\u9700\u731c\u6d4b): (from section 5, or None)\n"
+        "DRIFT (\u6267\u884c\u504f\u79bb\uff0ctasks\u5b9e\u9645\u8fdb\u5ea6\u4e0espec\u76ee\u6807\u4e0d\u4e00\u81f4): (from section 6, or None)\n"
         "RECOMMENDATION: (max 3 actionable bullets to improve the documents)\n"
     )
 
