@@ -145,6 +145,7 @@
 - 裁决: PASS / INCOMPLETE / REALIGN_NEEDED (输出含SPEC_GAPS/BLIND_SPOTS/DRIFT/RECOMMENDATION)
 - 异常安全: try/except包裹，失败不影响主流程；Opus不可用时安全降级返回None
 - 测试: 11/11单元测试通过(prompt升级后重新验证)
+- 手动触发: `/review-SDD [path]` 斜杠命令(agentmain.py _handle_slash_cmd, 全终端通用TUI/飞书/微信/WebView); 无参时用handler.working['project_root'], 有参时手动指定路径; 拦截在LLM前不消耗token; 24/24单元测试通过
 
 ## [session_event_log ga.py接入] <!-- updated: 2026-05-02 -->
 - 接入点: ga.py turn_end_callback L645-656 (summary记录后, hooks前)
