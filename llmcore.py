@@ -270,9 +270,9 @@ def _cleanup_history_tool_boundaries(history):
             history.insert(first_non_sys, {"role": "user", "content": [{"type": "text", "text": "(context trimmed)"}]})
 
 
-def trim_messages_history(history, context_win):
-    cap = context_win * 3
-    target = int(cap * 0.6)
+def trim_messages_history(history, sess):
+    cap = sess.context_win * 3
+    target = int(cap * getattr(sess, 'trim_keep_rate', 0.6))
     def cost(): return sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
     compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
     print(f'[Debug] Current context: {cost()} chars, {len(history)} messages.')
