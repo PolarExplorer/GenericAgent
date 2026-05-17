@@ -732,7 +732,52 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _setup_log_tee():
+    """Tee stdout/stderr to tui_debug.log so print() diagnostics are
+    visible even when launched via shortcut (no console window)."""
+    import io
+    log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tui_debug.log")
+    # Rotate: keep last 200KB to avoid unbounded growth
+    try:
+        if os.path.exists(log_path) and os.path.getsize(log_path) > 200_000:
+            with open(log_path, "rb") as f:
+                f.seek(-100_000, 2)
+                tail = f.read()
+            with open(log_path, "wb") as f:
+                f.write(tail)
+    except Exception:
+        pass
+    class _Tee:
+        def __init__(self, orig, log_file):
+            self._orig = orig
+            self._log = log_file
+        def write(self, s):
+            try:
+                self._orig.write(s)
+            except Exception:
+                pass
+            try:
+                self._log.write(s)
+                self._log.flush()
+            except Exception:
+                pass
+        def flush(self):
+            try: self._orig.flush()
+            except Exception: pass
+            try: self._log.flush()
+            except Exception: pass
+        def __getattr__(self, name):
+            return getattr(self._orig, name)
+    log_file = open(log_path, "a", encoding="utf-8", errors="replace")
+    log_file.write(f"\n{'='*60}\n[TUI START] {time.strftime('%Y-%m-%d %H:%M:%S')}\n{'='*60}\n")
+    sys.stdout = _Tee(sys.stdout, log_file)
+    sys.stderr = _Tee(sys.stderr, log_file)
+    return log_path
+
+
 def main(argv: Optional[list[str]] = None) -> int:
+    log_path = _setup_log_tee()
+    print(f"[TUI] Debug log: {log_path}")
     args = build_arg_parser().parse_args(argv)
     app = GenericAgentTUI()
     app.run()
