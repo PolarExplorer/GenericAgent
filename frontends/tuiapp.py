@@ -559,16 +559,31 @@ class GenericAgentTUI(App[None]):
 
     def _cmd_llm(self, args: list[str]) -> None:
         session = self.current
+        agent = session.agent
         if args:
-            try:
-                session.agent.next_llm(int(args[0]))
-                self._system(f"Switched model to #{int(args[0])}.")
-            except Exception as exc:
-                self._system(f"Model switch failed: {exc}")
+            cmd = str(args[0]).strip().lower()
+            if cmd in ("auto", "free", "unlock"):
+                agent.llm_locked = False
+                self._system("LLM auto routing enabled. The next user query will use baseline + pre_router.")
                 return
+            if cmd not in ("status", "state"):
+                try:
+                    n = int(cmd)
+                    agent.next_llm(n)
+                    agent.baseline_llm_no = agent.llm_no
+                    agent.llm_locked = True
+                    self._system(f"Switched and locked model to #{n}.")
+                except Exception as exc:
+                    self._system(f"Model switch failed: {exc}")
+                    return
         try:
-            rows = session.agent.list_llms()
-            self._system("Models:\n" + "\n".join(f"{'*' if cur else ' '} {i}: {name}" for i, name, cur in rows))
+            rows = agent.list_llms()
+            current = getattr(agent, "llm_no", None)
+            baseline = getattr(agent, "baseline_llm_no", None)
+            locked = getattr(agent, "llm_locked", False)
+            lines = [f"state: current={current}, baseline={baseline}, locked={locked}"]
+            lines.extend(f"{'*' if cur else ' '} {i}: {name}" for i, name, cur in rows)
+            self._system("Models:\n" + "\n".join(lines))
         except Exception as exc:
             self._system(f"Listing models failed: {exc}")
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 import queue
+from skill_commands import discover as _discover_skills
 import re
 import sys
 import tempfile
@@ -184,13 +185,19 @@ COMMANDS = [
     ("/rewind",   "[n]",              "回退最近 n 轮"),
     ("/clear",    "",                 "清空显示（不动 LLM 历史）"),
     ("/stop",     "",                 "中止当前任务"),
-    ("/llm",      "[n]",              "查看 / 切换模型"),
+    ("/llm",      "[n|auto]",         "查看 / 切换 / 自动选择模型"),
     ("/btw",      "<question>",       "side question — 不打断主 agent"),
     ("/continue", "[n]",              "列出 / 恢复历史会话"),
     ("/export",   "clip|<file>|all",  "导出最后回复"),
     ("/restore",  "",                 "恢复上次模型响应日志"),
     ("/quit",     "",                 "退出"),
 ]
+# Auto-discover skill commands from SKILL.md files
+try:
+    _builtin = {c[0] for c in COMMANDS}
+    COMMANDS += _discover_skills(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), _builtin)
+except Exception:
+    pass  # fail silently — skill palette is optional
 
 
 # ---------- 交互式选择 widget ----------
@@ -656,24 +663,28 @@ class GenericAgentTUI(App[None]):
     #body { height: 1fr; }
 
     #sidebar {
-        width: 34;
+        width: 30;
+        min-width: 24;
         height: 100%;
         background: #0d1117;
-        padding: 1 2;
-        border-right: solid #21262d;
+        padding: 0 1;
+        border: solid $accent;
+        overflow-x: hidden;
     }
     #sidebar.-hidden, #sidebar.-narrow { display: none; }
 
     #main {
         height: 100%;
-        padding: 1 6;
+        padding: 0 1;
         background: #0d1117;
     }
 
     #messages {
         height: 1fr;
         background: #0d1117;
-        scrollbar-size: 0 0;
+        border: solid $primary;
+        padding: 0 1;
+        scrollbar-size-vertical: 1;
     }
 
     .role {

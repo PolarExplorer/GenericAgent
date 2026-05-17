@@ -44,6 +44,14 @@ COMPONENTS = {
         "daemon": "wxapp_daemon.pyw",
         "match_keywords": ["wechatapp.py", "wxapp_daemon"],
     },
+    "tuiapp": {
+        "stop_file": None,
+        "lock_file": None,
+        "ports": [],
+        "daemon": os.path.join("frontends", "tuiapp_v2.py"),
+        "match_keywords": ["tuiapp_v2.py"],
+        "console": True,  # TUI app needs a visible terminal window
+    },
 }
 
 # all = 只重启 bot 通道（安全默认，不中断当前会话）
@@ -362,19 +370,25 @@ def start_component(name, cfg):
         except Exception:
             pass
 
-    # 查找 pythonw.exe（与当前 python 同目录）
-    pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
-    if not os.path.isfile(pythonw):
-        # 回退到 python.exe
-        pythonw = sys.executable
-        log(f"[WARN] 未找到 pythonw.exe，使用 {pythonw}")
+    # console 模式（TUI 等需要可见终端的组件）vs 后台 daemon 模式
+    use_console = cfg.get("console", False)
+    if use_console:
+        exe = sys.executable  # python.exe
+        flags = subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        # 查找 pythonw.exe（与当前 python 同目录）
+        exe = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+        if not os.path.isfile(exe):
+            exe = sys.executable
+            log(f"[WARN] 未找到 pythonw.exe，使用 {exe}")
+        flags = CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
 
     log(f"[START] 启动 {name} ({daemon}) ...")
     try:
         subprocess.Popen(
-            [pythonw, daemon_path],
+            [exe, daemon_path],
             cwd=BASE_DIR,
-            creationflags=CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+            creationflags=flags,
         )
     except Exception as e:
         log(f"启动失败: {e}")

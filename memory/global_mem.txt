@@ -141,10 +141,10 @@
 - 模块: ga_review_hook.py (track_project_root + run_review)
 - 接入点: ga.py turn_end_callback L832-840 (hooks后, return前)
 - 触发: exit_reason==CURRENT_TASK_DONE 且 working['project_root']存在
-- 机制: 每轮扫tool_calls文件路径→向上搜spec.md→存project_root；任务完成时读spec.md+tasks.md→组装SDD审查prompt(4段: Spec结构7要素+Tasks一致性+领域盲区补全+漂移检查)→llmclients[2](Opus) raw_ask→打印裁决+写review_latest.md
-- 裁决: PASS / INCOMPLETE / REALIGN_NEEDED (输出含SPEC_GAPS/BLIND_SPOTS/DRIFT/RECOMMENDATION)
+- 机制: 每轮扫tool_calls文件路径→向上搜spec.md→存project_root；任务完成时全量读取4文件(spec.md+tasks.md+plan.md+traceability_matrix.md, 无截断)→组装SDD审查prompt(6段: Spec结构7要素+Tasks一致性+Plan与spec/tasks对齐+Traceability需求追溯+领域盲区补全+漂移检查)→llmclients[2](Opus) raw_ask→打印裁决+写review_latest.md
+- 裁决: PASS / INCOMPLETE / REALIGN_NEEDED (输出含5标签+中文备注: SPEC_GAPS/PLAN_ALIGNMENT/TRACEABILITY/BLIND_SPOTS/DRIFT)
 - 异常安全: try/except包裹，失败不影响主流程；Opus不可用时安全降级返回None
-- 测试: 11/11单元测试通过(prompt升级后重新验证)
+- 测试: 34/34单元测试通过(全量读取+6段prompt+5标签+边界)
 - 手动触发: `/review-SDD [path]` 斜杠命令(agentmain.py _handle_slash_cmd, 全终端通用TUI/飞书/微信/WebView); 无参时用handler.working['project_root'], 有参时手动指定路径; 拦截在LLM前不消耗token; 24/24单元测试通过
 
 ## [session_event_log ga.py接入] <!-- updated: 2026-05-02 -->
@@ -185,6 +185,12 @@
 - **Bug3 trailing assistant残留**: trim_messages_history裁剪后末尾可能残留无tool_result的assistant(tool_use)消息，下轮拼接新user时API报错。修复: trim末尾while循环检测最后一条是否为含tool_use的assistant，若是则pop
 - 通用教训: **history裁剪/压缩操作后必须做三项边界校验——首条角色合法性、相邻角色不重复、末尾消息完整性**
 - 验证: 4项针对性测试PASS
+
+## [公考训练数据OCR清洗门禁] <!-- added: 2026-05-16 -->
+- 适用范围：`D:\KnowledgeFoundation\domains\civil_service_exam\` 内所有由 OCR/PDF 转出的题面、选项、答案、解析、批注、训练包数据；包括 T015 及之后批次。
+- 硬规则：OCR 只能作为 raw evidence，不能直接入库、解锁、训练或生成正式讲解；数据必须先按 T014/T015 当前清洗规则产出 cleaned/corrected 版本并通过 gate 后才能使用。
+- 清洗基准：题面/选项/答案/解析分区；保留 source_pdf/page/evidence；删除页眉页脚/水印/广告/跨题串扰；修正 OCR 编号/选项/数字串错误；解析必须与本题题干和答案一致；AI 补写必须标注为整理/修正，不伪装成官方原文。
+- Gate：未完成 `*_cleaning_plan.md`、`*_cleaned_validation_packet.md`、`*_cleaning_issues.jsonl`、`*_cleaning_gate_report.json` 且人工复核未 pass 时，状态必须保持 pending/not_unlocked；审核态与训练态分离。
 
 ## [P1 飞书训练系统] <!-- updated: 2026-05-07 -->
 - 大题型MVP已验收：`scripts/push/render_daily.py` 可按 `--questions qid1,qid2` 渲染 `03_题库/big_questions_seed.jsonl` 中的大题卡；`scripts/push/grading_listener.py` 已兼容 `answer→reference_answer`、`rubric→scoring_points`，大题进入人工复核并在批改卡展示参考答案/评分要点。
@@ -239,3 +245,10 @@
 - 核心机制: 单一资产(一次只改一个)、双重评估(只读基线+变更方案)、棘轮机制(只允许净改善)、独立评分(改前改后对比)、人在回路(高风险变更需用户确认)
 - 触发: "维护/优化/收敛/清理/升级"知识资产；规则误触发/SOP老化/Skill冲突/索引膨胀
 - 验收记录：`D:\KnowledgeFoundation\00_项目管理\2026-05-05_P1_大题型支持MVP验收记录.md`
+
+## [Media Tools] <!-- added: 2026-05-16 -->
+- ffmpeg: `D:\soft\dumate\resources\extra-resource\opencode\bin\ffmpeg.exe` (dumate bundled; no ffprobe in same dir)
+- yt-dlp: pip installed (2026.3.17), supports bilibili/youtube etc
+- Edge cookie DB lock: Edge running time completely locks `Cookies` SQLite DB (WinError 32 / PermissionError); Python shutil.copy/raw open/SQLite immutable URI/yt-dlp --cookies-from-browser ALL fail; only workaround: user manually copies cookie value from DevTools (F12 > Application > Cookies)
+- bilibili 1080P: requires SESSDATA cookie (HttpOnly, DevTools only); tool: `memory/bilibili_dl.py` (yt-dlp + Netscape cookie file + ffmpeg merge)
+- default download dir: `E:\xiazai` (user preference; bilibili_dl.py default output_dir)

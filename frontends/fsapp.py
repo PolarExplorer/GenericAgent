@@ -630,6 +630,23 @@ def _make_task_hook(card, done_event, on_final):
                         return
                 mt = ctx.get('model_trace') or {}
                 actual = mt.get('actual', '')
+                # [方案A 2026-05-14] 若整个任务一个 step 都没记录过（如 gpt-5.3 单 turn 完成
+                # 或省略 <summary> 标签的模型），在 done 之前补一条"过程快照"step，
+                # 避免飞书卡片从"工作中"直接跳到"已完成"造成黑盒感。
+                try:
+                    if not card.steps:
+                        tool_calls = ctx.get('tool_calls') or []
+                        snap_detail = _build_step_detail(resp, tool_calls)
+                        if tool_calls:
+                            _tn = tool_calls[0].get('name') if isinstance(tool_calls[0], dict) else getattr(tool_calls[0], 'name', '?')
+                            snap_summary = f"⚙️ 单轮完成 · 调用 {_tn}（共{len(tool_calls)}次工具）"
+                        else:
+                            snap_summary = "⚙️ 单轮完成 · 直接回答"
+                        if actual:
+                            snap_summary += f" | 🤖{actual}"
+                        card.step(snap_summary, snap_detail)
+                except Exception as _e:
+                    print(f"[fs hook] snap step error: {_e}")
                 display = _display_text(raw)
                 if actual:
                     chain = mt.get('chain', [])

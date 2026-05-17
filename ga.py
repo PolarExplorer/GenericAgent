@@ -829,6 +829,15 @@ class GenericAgentHandler(BaseHandler):
         _backend = getattr(_lc, 'backend', None) if _lc else None
         model_trace = getattr(_backend, 'model_trace', {}) if _backend else {}
         for hook in getattr(self.parent, '_turn_end_hooks', {}).values(): hook(locals())  # current readonly
+        # === Review Hook: track project root + trigger on task done ===
+        try:
+            from ga_review_hook import track_project_root, run_review
+            track_project_root(tool_calls, self.working)
+            if exit_reason == 'CURRENT_TASK_DONE' and self.working.get('project_root'):
+                run_review(self.working, self.parent)
+        except Exception:
+            pass
+        # === END Review Hook ===
         return next_prompt
 
 def get_global_memory():

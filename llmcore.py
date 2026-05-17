@@ -933,9 +933,13 @@ class BaseSession:
         actual = getattr(self, 'name', '') or getattr(self, 'model', '')
         return {'requested': actual, 'actual': actual, 'fallback_count': 0, 'chain': [actual] if actual else []}
     def _apply_claude_thinking(self, payload):
-        if self.thinking_type:
-            thinking = {"type": self.thinking_type}
-            if self.thinking_type == 'enabled':
+        tt = self.thinking_type
+        # Auto-default: thinking models without explicit thinking_type get "adaptive"
+        if not tt and _is_thinking_model(self.model):
+            tt = 'adaptive'
+        if tt:
+            thinking = {"type": tt}
+            if tt == 'enabled':
                 if self.thinking_budget_tokens is None: print("[WARN] thinking_type='enabled' requires thinking_budget_tokens, ignored.")
                 else:
                     thinking["budget_tokens"] = self.thinking_budget_tokens; payload["thinking"] = thinking
@@ -1028,7 +1032,7 @@ def _drop_unsigned_thinking(messages):
 
 def _ensure_thinking_blocks(messages, model):
     """deepseek needs thinking in history!"""
-    if 'deepseek' not in model.lower(): return messages
+    if not _is_thinking_model(model): return messages
     for m in messages:
         if m.get("role") != "assistant": continue
         c = m.get("content")
@@ -1097,9 +1101,18 @@ class NativeClaudeSession(BaseSession):
     def raw_ask(self, messages):
         if not messages:
             return {"role": "assistant", "content": "(empty input)", "empty_guard": True}
-        messages = _ensure_thinking_blocks(_drop_unsigned_thinking(_fix_messages(messages)), self.model)
+        fixed = _fix_messages(messages)
+        # Skip _drop_unsigned_thinking for thinking models: third-party providers (e.g. MiniMax)
+        # don't use Anthropic's signature mechanism — their thinking blocks have empty signatures
+        # and would be incorrectly stripped. For native Claude, blocks have real signatures so
+        # _drop_unsigned_thinking is a no-op anyway.
+        if _is_thinking_model(self.model):
+            messages = _ensure_thinking_blocks(fixed, self.model)
+        else:
+            messages = _ensure_thinking_blocks(_drop_unsigned_thinking(fixed), self.model)
         # 非原生Anthropic节点: 第三方中转(如CodeWhisperer)不支持thinking block type
-        if not self.api_key.startswith("sk-ant-"):
+        # 但如果当前session是thinking模型(如MiniMax mimo-v2.5-pro), 必须保留thinking blocks
+        if not self.api_key.startswith("sk-ant-") and not self.thinking_type and not _is_thinking_model(self.model):
             for _m in messages:
                 _c = _m.get("content")
                 if isinstance(_c, list):
@@ -1140,7 +1153,7 @@ class NativeClaudeSession(BaseSession):
             messages[idx]["content"][-1] = dict(messages[idx]["content"][-1], cache_control={"type": "ephemeral"})
         # --- 方案A: 非原生Anthropic节点 payload/header 白名单清洗 ---
         if not self.api_key.startswith("sk-ant-"):
-            _PAYLOAD_WHITELIST = {"model", "messages", "max_tokens", "stream", "temperature", "system", "tools", "tool_choice", "stop_sequences", "top_p", "top_k"}
+            _PAYLOAD_WHITELIST = {"model", "messages", "max_tokens", "stream", "temperature", "system", "tools", "tool_choice", "stop_sequences", "top_p", "top_k", "thinking", "output_config"}
             for _pk in list(payload.keys()):
                 if _pk not in _PAYLOAD_WHITELIST:
                     del payload[_pk]
