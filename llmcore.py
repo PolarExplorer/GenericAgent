@@ -631,10 +631,14 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
                     if not e.value and not streamed: raise requests.ConnectionError("empty response")
                     return e.value or []
         except (requests.Timeout, requests.ConnectionError) as e:
+            _elapsed = time.time() - _req_started_at
+            _phase = "mid-stream" if streamed else "connect"
             err = f"!!!Error: {type(e).__name__}"
+            # Full diagnostic for post-mortem (e.g. ChunkedEncodingError = proxy/server dropped mid-stream)
+            print(f"[NET_ERR_DETAIL] {type(e).__name__} ({_phase}, {_elapsed:.1f}s): {e}")
             if attempt < sess.max_retries:
                 d = _delay(None, attempt)
-                print(f"[NET_RETRY_EXC] [LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1}) url={url} elapsed={time.time()-_req_started_at:.1f}s")
+                print(f"[NET_RETRY_EXC] [LLM Retry] {type(e).__name__} ({_phase}), retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1}) url={url} elapsed={_elapsed:.1f}s")
                 yield err; time.sleep(d); continue
             yield err; return [{"type": "text", "text": err}]
         except Exception as e:
