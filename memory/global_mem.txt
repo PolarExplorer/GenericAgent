@@ -239,7 +239,7 @@
 - 触发: 复杂多轮任务收尾、失败升级后收口、用户要求复盘
 - 价值: 避免只留聊天摘要难以复盘；避免失败路径反复踩坑；给trace2skill/debugging_sop提供证据节点
 
-## [Darwin Maintenance SOP] <!-- updated: 2026-05-18 -->
+## [Darwin Maintenance SOP] <!-- updated: 2026-05-19 -->
 - 文件: darwin_maintenance_sop.md
 - 用途: SOP/Skill/规则/约束/L1-L3索引的持续维护元SOP
 - 核心机制: 单一资产(一次只改一个)、双重评估(只读基线+变更方案)、棘轮机制(只允许净改善)、独立评分(改前改后对比)、人在回路(高风险变更需用户确认)
@@ -247,6 +247,16 @@
 - GA Darwin Router: `skills/maintenance/darwin_ga_router_skill.md` + `darwin_ga_router.py`；上游整包只读保存在 `vendor/darwin-skill/`，GA运行状态写 `.darwin/`。
 - Router边界: 白名单支持 `vendor-summary`/`eval`/`tests`/`history`/`record`；禁止全量自动patch、直接改L1/L2/规则、自动git reset/stash/revert、Mac-only成果卡片脚本；高风险变更必须先询问用户。
 - 验收记录：`D:\KnowledgeFoundation\00_项目管理\2026-05-05_P1_大题型支持MVP验收记录.md`
+- **100分评估引擎** `darwin_eval_engine.py`(D:\AI\GenericAgent根目录, memory/有副本):
+  - import: `sys.path.insert(0, "D:\\AI\\GenericAgent") + sys.path.insert(0, "D:\\AI\\GenericAgent\\memory")`
+  - API: `mykey.native_oai_config` 字典(get apikey/apibase, 非OPENAI_*)
+  - model: `gpt-5.5`(codex端点, 不支持gpt-4.1-mini)
+  - 关键函数: `evaluate_asset(Path)`→返回`static_score`(D1-D6, 非total); `evaluate_d7_d8_llm(text, name)`→D7-D8 LLM分; `_apply_llm_scores(result, llm)`→合并为total_score
+  - 批量: ~7s/次LLM调用, 105资产~735s, 需checkpoint每10条(超时重跑用)
+  - 全量基线(2026-05-19): 105资产 avg=61.4/100, Top=spec_driven_dev(80.6), Bot=keychain(42.0)
+  - report: `Desktop\darwin_full_baseline_report.md`; JSON: `temp/darwin_full_100.json`
+  - SOP固化: commit a7cf9f6(patch Phase1/Phase4/Section4评分表+证据模板)
+  - Bottom3优化: commit 5edfee1(rules_engine/project_board/architecture)
 
 ## [Media Tools] <!-- added: 2026-05-16 -->
 - ffmpeg: `D:\soft\dumate\resources\extra-resource\opencode\bin\ffmpeg.exe` (dumate bundled; no ffprobe in same dir)
