@@ -357,15 +357,108 @@ def evaluate_d7_d8_llm(text: str, asset_name: str, api_key: str = None,
         return {"D7": None, "D8": None, "error": str(e)}
 
 
+# ── Asset classification ──────────────────────────────────────────
+def classify_asset(filepath: Path) -> str:
+    """Classify asset as 'sop' or 'tool' based on filename pattern."""
+    name = filepath.name.lower()
+    if name.endswith(".py"):
+        return "tool"
+    if "_sop" in name or "_skill" in name:
+        return "sop"
+    return "tool"
+
+
+# ── Tool file scoring variants (D1/D4 differ; D2/D3/D5/D6 augmented) ──
+def score_d1_tool(text: str) -> Tuple[int, List[str]]:
+    """D1 for tool files: docstring quality instead of struct header."""
+    raw = 0
+    reasons = []
+    
+    # Module-level docstring (3pts)
+    if re.search(r'^("""|\'\'\')', text.strip(), re.MULTILINE):
+        raw += 3; reasons.append("module_docstring(+3)")
+    elif re.search(r'""".+?"""', text[:500], re.DOTALL):
+        raw += 2; reasons.append("inline_module_doc(+2)")
+    else:
+        reasons.append("no_module_docstring(+0)")
+    
+    # Function/class docstrings (4pts)
+    func_defs = re.findall(r"^\s*def\s+\w+", text, re.MULTILINE)
+    func_docs = re.findall(r'def\s+\w+\s*\([^)]*\)[^:]*:\s*\n\s+("""|\'\'\')', text)
+    class_defs = re.findall(r"^\s*class\s+\w+", text, re.MULTILINE)
+    class_docs = re.findall(r'class\s+\w+.*:\s*\n\s+("""|\'\'\')', text)
+    
+    total_defs = len(func_defs) + len(class_defs)
+    total_docs = len(func_docs) + len(class_docs)
+    
+    if total_defs > 0 and total_docs >= total_defs * 0.7:
+        raw += 4; reasons.append(f"docstrings({total_docs}/{total_defs})(+4)")
+    elif total_defs > 0 and total_docs >= total_defs * 0.3:
+        raw += 2; reasons.append(f"partial_docstrings({total_docs}/{total_defs})(+2)")
+    elif total_defs > 0:
+        reasons.append(f"few_docstrings({total_docs}/{total_defs})(+0)")
+    else:
+        raw += 2; reasons.append("script_no_funcs(+2)")
+    
+    # Type hints on parameters (3pts)
+    typed_params = len(re.findall(r"def\s+\w+\s*\([^)]*:\s*\w+", text))
+    if total_defs > 0 and typed_params >= total_defs * 0.5:
+        raw += 3; reasons.append(f"type_hints({typed_params}/{total_defs})(+3)")
+    elif total_defs > 0 and typed_params > 0:
+        raw += 1; reasons.append(f"some_type_hints({typed_params})(+1)")
+    else:
+        reasons.append("no_type_hints(+0)")
+    
+    return raw, reasons
+
+
+def score_d4_tool(text: str) -> Tuple[int, List[str]]:
+    """D4 for tool files: logging/assert/test patterns as checkpoints."""
+    raw = 0
+    reasons = []
+    
+    # Logging patterns (3pts)
+    if re.search(r"(?i)(import\s+logging|from\s+logging|getLogger)", text):
+        raw += 3; reasons.append("has_logging(+3)")
+    elif re.search(r"(?i)(print\s*\(|sys\.stderr\.write)", text):
+        raw += 1; reasons.append("print_output(+1)")
+    else:
+        reasons.append("no_logging(+0)")
+    
+    # Assert/test patterns (3pts)
+    if re.search(r"(?i)(assert\s|def\s+test_|unittest|pytest)", text):
+        raw += 3; reasons.append("assert_or_test(+3)")
+    elif re.search(r"(?i)(# ?test|# ?verify|# ?check|# ?validate)", text):
+        raw += 1; reasons.append("test_comments(+1)")
+    else:
+        reasons.append("no_test_patterns(+0)")
+    
+    # Main guard (1pt)
+    if re.search(r'if\s+__name__\s*==\s*["\']__main__["\']', text):
+        raw += 1; reasons.append("main_guard(+1)")
+    else:
+        reasons.append("no_main_guard(+0)")
+    
+    return raw, reasons
+
+
 # ── Main scoring ──────────────────────────────────────────────────
 def evaluate_asset(filepath: Path) -> dict:
+    """Score asset with D1-D6 static analysis (category-aware)."""
     text = filepath.read_text(encoding="utf-8", errors="replace")
     name = filepath.name
+    cat = classify_asset(filepath)
     
-    d1_raw, d1_reasons = score_d1(text)
+    # D1/D4 branch by category
+    if cat == "sop":
+        d1_raw, d1_reasons = score_d1(text)
+        d4_raw, d4_reasons = score_d4(text)
+    else:
+        d1_raw, d1_reasons = score_d1_tool(text)
+        d4_raw, d4_reasons = score_d4_tool(text)
+    
     d2_raw, d2_reasons = score_d2(text)
     d3_raw, d3_reasons = score_d3(text)
-    d4_raw, d4_reasons = score_d4(text)
     d5_raw, d5_reasons = score_d5(text)
     d6_raw, d6_reasons = score_d6(text)
     
@@ -380,6 +473,7 @@ def evaluate_asset(filepath: Path) -> dict:
     
     result = {
         "asset": name,
+        "category": cat,
         "dimensions": {
             "D1_frontmatter": {"weight": 8, "raw": d1_raw, "weighted": d1_raw * 8 / 10, "reasons": d1_reasons},
             "D2_workflow":    {"weight": 15, "raw": d2_raw, "weighted": d2_raw * 15 / 10, "reasons": d2_reasons},
@@ -404,7 +498,7 @@ def cmd_eval(args):
         sys.exit(1)
     result = evaluate_asset(fp)
     
-    print(f"asset: {result['asset']}")
+    print(f"asset: {result['asset']}  [{result.get('category', '?')}]")
     print(f"static_score (D1-D6): {result['static_score']}/{result['max_static']}")
     print()
     for dim, info in result["dimensions"].items():
@@ -435,14 +529,15 @@ def cmd_batch(args):
             results.append({"asset": f.name, "error": str(e)})
     
     # Print summary table
-    print(f"{'Asset':<45} {'D1':>3} {'D2':>3} {'D3':>3} {'D4':>3} {'D5':>3} {'D6':>3} {'Static':>7}")
-    print("-" * 80)
+    print(f"{'Asset':<40} {'Cat':<5} {'D1':>3} {'D2':>3} {'D3':>3} {'D4':>3} {'D5':>3} {'D6':>3} {'Static':>7}")
+    print("-" * 85)
     for r in results:
         if "error" in r:
-            print(f"{r['asset']:<45} ERROR: {r['error']}")
+            print(f"{r['asset']:<40} {'?':<5} ERROR: {r['error']}")
             continue
         d = r["dimensions"]
-        print(f"{r['asset']:<45} {d['D1_frontmatter']['raw']:>3} {d['D2_workflow']['raw']:>3} {d['D3_boundary']['raw']:>3} {d['D4_checkpoints']['raw']:>3} {d['D5_specificity']['raw']:>3} {d['D6_resources']['raw']:>3} {r['static_score']:>6.1f}")
+        cat = r.get("category", "?")
+        print(f"{r['asset']:<40} {cat:<5} {d['D1_frontmatter']['raw']:>3} {d['D2_workflow']['raw']:>3} {d['D3_boundary']['raw']:>3} {d['D4_checkpoints']['raw']:>3} {d['D5_specificity']['raw']:>3} {d['D6_resources']['raw']:>3} {r['static_score']:>6.1f}")
     
     # Save JSON
     out = Path(args.output) if args.output else mem.parent / "temp" / "darwin_eval_v2_baseline.json"
@@ -508,7 +603,7 @@ def cmd_full_eval(args):
     result = evaluate_asset(fp)
     text = fp.read_text(encoding="utf-8", errors="replace")
     
-    print(f"asset: {result['asset']}")
+    print(f"asset: {result['asset']}  [{result.get('category', '?')}]")
     print(f"static_score (D1-D6): {result['static_score']}/{result['max_static']}")
     for dim, info in result["dimensions"].items():
         if info["raw"] is not None:
@@ -588,14 +683,15 @@ def cmd_full_batch(args):
         avg_d8 = sum(d8s) / len(d8s) if d8s else 0
         
         print(f"\n{'='*80}")
-        print(f"{'SOP':<48} {'Static':>6} {'D7':>4} {'D8':>4} {'Total':>6}")
-        print(f"{'-'*80}")
+        print(f"{'SOP':<43} {'Cat':<5} {'Static':>6} {'D7':>4} {'D8':>4} {'Total':>6}")
+        print(f"{'-'*85}")
         for r in ok:
             d = r["dimensions"]
             d7 = d["D7_architecture"]["raw"] or "-"
             d8 = d["D8_test_exec"]["raw"] or "-"
-            print(f"{r['asset']:<48} {r['static_score']:>6.1f} {str(d7):>4} {str(d8):>4} {r['total_score']:>6.1f}")
-        print(f"{'-'*80}")
+            cat = r.get("category", "?")
+            print(f"{r['asset']:<43} {cat:<5} {r['static_score']:>6.1f} {str(d7):>4} {str(d8):>4} {r['total_score']:>6.1f}")
+        print(f"{'-'*85}")
         print(f"{'AVERAGE':<48} {avg_static:>6.1f} {avg_d7:>4.1f} {avg_d8:>4.1f} {avg:>6.1f}")
         print(f"\nSuccess: {len(ok)}/{len(results)} | Errors: {len(errors)}")
     print(f"Results saved: {out}")
