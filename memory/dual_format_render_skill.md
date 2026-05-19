@@ -32,6 +32,8 @@ JSON 中间态 (单一真相源)
 3. **编码安全**: HTML 渲染时对用户数据做 HTML escape
 4. **可预览**: HTML 版本要可直接在浏览器打开，内联 CSS
 
+
+**确认点：** 渲染前用 `ask_user` 确认 JSON schema 是否符合预期，避免渲染失败后才发现数据结构错误。
 ## 索引/路由
 
 - L1/L2/L3 索引名：`dual_format_render_skill`，用于“结构化 JSON → Markdown + HTML”召回
@@ -50,3 +52,11 @@ JSON 中间态 (单一真相源)
 - 直接改 MD 而非 JSON 导致两版不一致 → 流程强制从 JSON 出发
 - HTML 中未 escape 用户数据导致标签破坏 → 用 html.escape()
 - Jinja2 模板中变量名拼错无报错 → 用 StrictUndefined
+
+**确认点：** 渲染完成后用 `ask_user` 确认 MD/HTML 都能正常打开，字段完整性无遗漏。
+
+## 相关资源
+- 上游数据蒸馏：`memory/llm_json_distill_skill.md`（JSON 中间态来源）
+- 上游数据采集：`memory/authenticated_fetch_skill.md`（登录态 fetch）
+- PDF 输出扩展：`memory/md_to_pdf.py`（MD→PDF 转换）
+- 维护流程：`memory/darwin_maintenance_sop.md`（结构评估与优化）
