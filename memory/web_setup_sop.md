@@ -19,6 +19,12 @@
 若 web_scan 和 web_execute_js 已测试可用，无需执行此 SOP。
 仅供初始安装时，code_run 可用但 web 工具尚未配置的场景。
 
+### 边界条件（何时不执行）
+- 浏览器已安装但 web_scan 返回空标签页 → 不需要重装扩展，直接打开网页即可
+- 扩展已安装但 CDP 连接失败 → 检查端口冲突（见 tmwebdriver_sop），不要重复安装
+- 用户使用非 Chrome 浏览器 → 用 ask_user 确认浏览器类型，本 SOP 仅支持 Chrome
+- 无系统级权限（code_run 不可用） → 无法执行，需请求用户手动安装
+
 ## 目标
 在仅具备系统级权限（code_run）时，建立 Web 交互能力（web_scan / web_execute_js）。
 
@@ -36,6 +42,7 @@
 1. 打开扩展管理页，开启「开发者模式」
 2. 点击「加载已解压的扩展程序」，选择 `assets/tmwd_cdp_bridge/` 目录，或让用户直接拖入
 3. 显示“错误”不用管，一般只是因为还没连上GA
+**确认点：** 安装完成后，用 `ask_user` 确认扩展列表中出现 "tmwd_cdp_bridge"，确认后继续验证。
 
 ## 验证
 **gate：** web_scan 返回有效标签页后，再执行 `web_execute_js` 测试。
@@ -48,3 +55,6 @@
 - 工具分发：`memory/tool_dispatch_sop.md`
 - 浏览器驱动：`memory/tmwebdriver_sop.md`
 - 扩展目录：`../assets/tmwd_cdp_bridge/`
+- 浏览器初始化：`memory/web_setup_sop.md`（即本文件，自引用）
+- Chrome DevTools Protocol：CDP 连接由 tmwd_cdp_bridge 扩展管理
+- 约束引擎：`memory/rules_engine.md`（操作规范参考）
