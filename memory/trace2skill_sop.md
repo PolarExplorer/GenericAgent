@@ -1,5 +1,16 @@
 # trace2skill_sop：轨迹驱动的经验蒸馏与合并治理
 
+## Struct Header
+- Trigger: 长任务(>=10 turns)结束后，需从执行轨迹提取可复用经验。
+- Inputs: 执行轨迹(working memory + history)、任务类型、失败/成功标记。
+- Outputs: trajectory_patch.json + merge_gate结果 + 收益追踪记录。
+- Tools: typed_memory_sop(四格门控), memory_management_sop(层级规则)。
+- Side effects: 向L1/L2/L3写入trajectory patch，可能改变召回优先级。
+- Risk: 过度泛化单次经验导致噪声记忆。
+- Failure path: merge_gate拒绝→保留trajectory_patch供人工审核。
+- Review: 蒸馏后通过门禁检查+utility tracing验证收益。
+
+
 > 来源：arXiv:2603.25158 Trace2Skill 阅读与 GA 实践抽象。
 > 定位：L3 SOP。用于"任务结束后从执行轨迹提取经验 patch → 合并门禁 → 追踪收益"。
 > 前置依赖：typed_memory_sop（写入四格门控）、memory_management_sop（层级规则）。

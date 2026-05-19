@@ -1,5 +1,17 @@
 # typed_memory_sop：类型化长期记忆治理
 
+## Struct Header
+- Trigger: 需要写入或检索长期记忆(L1/L2/L3)。
+- Inputs: 候选信息、目标层级、当前上下文。
+- Outputs: 写入决策(写/不写/更新)或检索结果。
+- Tools: file_read, file_patch, memory_management_sop。
+- Side effects: 写入错误层级或过期事实会污染记忆。
+- Risk: 层级判断错误导致信息丢失或冲突。
+- Failure path: 写入失败→回退到只读检索+人工确认。
+- Review: 写入后通过typed_memory_utils门控检查。
+
+
+
 > 来源：arXiv:2604.22085 Memanto 阅读与本地实践抽象。  
 > 定位：L3 SOP。用于决定“查什么记忆、写什么记忆、如何避免冲突和过期事实”。  
 > 原则：No Execution, No Memory；未验证不入 L1/L2/L3。

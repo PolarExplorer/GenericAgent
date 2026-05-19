@@ -1,5 +1,16 @@
 # 定时任务 SOP
 
+## Struct Header
+- Trigger: 用户要求创建/修改/删除定时任务；scheduler.py轮询到时间条件触发。
+- Inputs: schedule时间、repeat类型、enabled状态、prompt内容、max_delay_hours。
+- Outputs: sche_tasks/done/YYYY-MM-DD_任务名.md执行报告；scheduler.log日志。
+- Tools: scheduler.py(轮询), update_working_checkpoint(防遗忘), file_write(报告)。
+- Side effects: sche_tasks目录下生成JSON和报告文件。
+- Risk: prompt执行失败；JSON格式错误；max_delay_hours过短导致任务被跳过。
+- Failure path: JSON解析错误→记录日志+跳过；prompt执行失败→记录error_log+不生成报告。
+- Review: 报告文件存在且非空；scheduler.log无ERROR；任务enabled状态正确。
+
+
 > 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
 
 目录：`../sche_tasks/` 放任务定义JSON，`../sche_tasks/done/` 放执行报告

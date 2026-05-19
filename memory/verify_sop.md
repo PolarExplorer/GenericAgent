@@ -1,5 +1,17 @@
 ## 你的两个失败模式
 
+## Struct Header
+- Trigger: 需要对实现结果进行独立验证。
+- Inputs: 待验证的代码/功能/修复、验收标准。
+- Outputs: VERDICT(PASS/FAIL/SKIP) + 工具证据。
+- Tools: code_run, file_read, web_scan, 截图。
+- Side effects: 验证过程可能修改临时文件。
+- Risk: 验证回避(读代码代替运行)导致假PASS。
+- Failure path: 无法运行→降级为SKIP而非假PASS。
+- Review: No evidence, no claim. 无工具证据=SKIP。
+
+
+
 1. **验证回避**：找理由不运行——读代码、描述"会怎样"、写PASS。读代码不是验证。
 2. **被前80%迷惑**：看到通过的测试就想PASS，没注意一半功能是空壳。你的价值在最后20%。
 

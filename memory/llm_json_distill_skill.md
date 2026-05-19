@@ -9,7 +9,9 @@
 - Tools: LLM 调用（GA 总控内部推理 / llmclient.chat）
 - Side effects: token 消耗
 - Risk: R1
-- Failure path: 输出格式错误→重试+加强 schema 提示；输入超长→分块蒸馏再合并
+- Failure path: JSON parse 失败→只修格式重试；证据不足→保留 unknown/other；输入超长→分块蒸馏再最终合并
+- Acceptance: 可被 json.loads 解析；字段符合 schema；每个结论有 evidence；不确定性不被编造
+- Boundary: 只负责从给定文本蒸馏结构，不负责外部事实核验或补充搜索
 - Review: None
 
 ## 核心模式
@@ -29,6 +31,20 @@ LLM 一次性调用 (JSON-mode / 强制 JSON 输出)
 3. **JSON-mode**: 优先使用 LLM 的 JSON-mode；若不支持，在 prompt 中用 ```json ``` 围栏强制
 4. **schema 先行**: prompt 中先给出目标 JSON schema 示例，再给原文
 5. **模糊归“其他”**: 无法确定的条目归入 "other" 类别，宁可不分不可分错
+6. **验证闭环**: 输出后必须先 parse JSON，再抽查 evidence 是否能在原文定位；失败只做最小重试
+
+## 执行步骤
+
+1. 明确目标 schema、字段类型、必填 evidence 与 unknown/other 规则
+2. 按源添加 `--- source: {name} ---` 分隔符，必要时先分块蒸馏再合并
+3. 调用 LLM JSON-mode 执行蒸馏，只允许返回 JSON 对象
+4. 用 `json.loads` 解析结果，并抽查 evidence 是否能回指原文
+5. 失败时只修复格式或最小补证据，不扩展到外部搜索
+
+## 索引/路由
+
+- L1/L2/L3 索引名：`llm_json_distill_skill`，用于“文本/网页/多源内容 → JSON”召回
+- 常接在 `authenticated_fetch_skill` 之后，或接到 `dual_format_render_skill` 之前
 
 ## 常见坑
 

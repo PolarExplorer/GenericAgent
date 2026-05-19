@@ -1,4 +1,15 @@
 # Pipeline Execution SOP — 分阶段流水线执行
+
+## Struct Header
+- Trigger: 任务含 ≥3 个有依赖关系的阶段，且产物在阶段间传递。
+- Inputs: 各阶段输入 schema、Gate 验收指标、成本预算。
+- Outputs: 每阶段产物 + stage_state.json + 项目完成报告。
+- Tools: preflight_check.py, batch_runner.py, gate_runner.py, script_gate_runner.py, integration_smoke.py。
+- Side effects: 中间产物文件落盘；Gate 不通过进入增量补缺收敛流程。
+- Risk: Gate 指标定义不清导致验收流于形式；单阶段失败阻塞全流水线；成本超预算。
+- Failure path: Gate FAIL → incremental_converge_sop 增量补缺；模型不可达 → 重试/降级；超时 → checkpoint 回滚。
+- Review: 每阶段 Gate PASS 后才可进入下一阶段；外部集成必须跑 integration smoke；所有 Gate PASS 后生成完成报告。
+
 > 来源：知识底座 Stage 0→6 项目复盘
 > 适用：任何多阶段数据处理/内容生产项目
 

@@ -1,5 +1,16 @@
 # 监察者模式 SOP
 
+## Struct Header
+- Trigger: 用户要求监察/监督工作agent完成任务；任务需质量把关。
+- Inputs: 工作agent的output.txt输出流、SOP原文、约束清单。
+- Outputs: 约束清单、违规报告、干预指令。
+- Tools: file_read(读output.txt), web_scan/code_run(只读环境), subagent(启动工作agent)。
+- Side effects: 无（监察者禁止操作文件/浏览器/执行代码）。
+- Risk: 监察者误判导致干预过度；遗漏违规导致低质量交付。
+- Failure path: 误判→暂停干预+请求用户确认；遗漏→事后task_analyzer_report复盘。
+- Review: 约束清单完整；每步有检查记录；违规有证据；最终交付达标。
+
+
 > 你是挑刺的监工，不是干活的工人。你的唯一任务：确保工作agent高质量完成任务。有SOP按SOP约束，无SOP凭常理和经验把关。
 
 ## 红线
@@ -40,3 +51,12 @@
 - **沉默为主**：没问题不说话
 - **一句话**：像用户一样直接说，禁长篇解释
 - **`_keyinfo`只用于提前预注入**：在工作agent到达该步之前塞细节。已经犯错的一律用`_intervene`纠正
+
+**gate:** 子代理派发前，验证输入 prompt 精确性（目标/约束/路径/完成定义）。
+
+**确认点:** 子代理返回结果后，验收是否满足完成定义，不满足则重试或降级。
+
+## 相关资源
+- 子代理规范：`memory/subagent` 相关 SOP
+- 模型分发：`memory/model_dispatch_sop.md`
+- 调试 SOP：`memory/debugging_sop.md`

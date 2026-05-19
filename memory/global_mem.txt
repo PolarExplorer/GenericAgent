@@ -202,10 +202,10 @@
 - 专家skill边界：用户线上反馈专家skill接入训练Bot主链路效果不好；当前策略是从知识底座/训练Bot主链路剥离，独立skill保留，需要时单独调用，避免persona覆盖考试证据。
 |- 题库审计门禁：`scripts/gate_check/gate6_check.py` 已接入 `audit_big_questions.py` 并挂到 `TASKS.yaml` 的 `t5_4_big_question_bank_audit`；对 `03_题库/big_questions_seed.jsonl` 验证 PASS，生成 `00_项目管理/big_questions_audit_report.json/.md`。
 
-## [Brain Dispatch /bd] <!-- updated: 2026-05-10 -->
-- brain_dispatch.py 已验证支持 SDD 执行前门禁：缺 constitution.md/spec.md/plan.md/tasks.md/validation.md 或缺 approval.md/--user-approved 时退出 42；py_compile 通过。
-- /bd 工作区模板入口: temp/bd_templates/sdd_workspace_template/，含 constitution/spec/experts/plan/tasks/validation/approval/README；辅助创建脚本 temp/bd_templates/new_bd_workspace.py。
-- 流程定位: gpt-5.5 负责大脑/专家skill选派/SDD把关，gpt-5.3-codex 或 deepseek-v4-flash 作为执行层；执行层只按已批准 tasks.md 操作。
+## [Brain Dispatch /bd] <!-- archived: 2026-05-18 -->
+- 已按用户确认归档禁用：`/bd` 与 `/brain-dispatch` 不再作为主动召回/推荐的 workflow skill。
+- 原文件已移至 `memory/skills/_deprecated/brain_dispatch/brain_dispatch_workflow_skill.md` 与 `memory/skills/_deprecated/brain_dispatch/brain_dispatch.py`；如需恢复，从归档目录移回 `memory/skills/workflow/` 并同步 L1 索引。
+- 历史工作区/模板可暂留：`temp/bd_workspace/`、`temp/bd_templates/`；未确认前不物理删除历史产物。
 
 ## [Skill Struct Header SOP] <!-- added: 2026-05-08 -->
 - 文件: skill_struct_header_sop.md
@@ -239,11 +239,13 @@
 - 触发: 复杂多轮任务收尾、失败升级后收口、用户要求复盘
 - 价值: 避免只留聊天摘要难以复盘；避免失败路径反复踩坑；给trace2skill/debugging_sop提供证据节点
 
-## [Darwin Maintenance SOP] <!-- added: 2026-05-08 -->
+## [Darwin Maintenance SOP] <!-- updated: 2026-05-18 -->
 - 文件: darwin_maintenance_sop.md
 - 用途: SOP/Skill/规则/约束/L1-L3索引的持续维护元SOP
 - 核心机制: 单一资产(一次只改一个)、双重评估(只读基线+变更方案)、棘轮机制(只允许净改善)、独立评分(改前改后对比)、人在回路(高风险变更需用户确认)
 - 触发: "维护/优化/收敛/清理/升级"知识资产；规则误触发/SOP老化/Skill冲突/索引膨胀
+- GA Darwin Router: `skills/maintenance/darwin_ga_router_skill.md` + `darwin_ga_router.py`；上游整包只读保存在 `vendor/darwin-skill/`，GA运行状态写 `.darwin/`。
+- Router边界: 白名单支持 `vendor-summary`/`eval`/`tests`/`history`/`record`；禁止全量自动patch、直接改L1/L2/规则、自动git reset/stash/revert、Mac-only成果卡片脚本；高风险变更必须先询问用户。
 - 验收记录：`D:\KnowledgeFoundation\00_项目管理\2026-05-05_P1_大题型支持MVP验收记录.md`
 
 ## [Media Tools] <!-- added: 2026-05-16 -->

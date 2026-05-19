@@ -1,4 +1,29 @@
 # Vue 3 自定义组件 JS 操作 SOP
+## Struct Header
+- Reader: GA 浏览器执行层
+- When to read: 操作 Vue 3 自定义组件（Select/Dropdown/富文本等）遇到 isTrusted 问题时
+- Trigger: web_execute_js 操作 Vue3 组件失败，事件不被响应
+- Inputs: 目标页面为 Vue 3 应用，有 DOM 选择器
+- Outputs: 组件状态成功更新（Select 选中/输入框赋值/编辑器内容写入）
+- Tools: web_execute_js, web_scan
+- Side effects: 修改页面组件状态，可能触发页面跳转或表单提交
+- Risk: R2（修改目标页面数据，但不涉及本机文件或凭证）
+- Review: 操作后用 web_scan 确认 DOM 更新
+
+## Workflow Phases
+1. 探测: 确认页面是 Vue3 (`__vue_app__` 存在)
+2. 定位: 找到目标 DOM 元素
+3. 反查: 用 findCompByEl 从 DOM 找到组件实例
+4. 执行: 调用组件 proxy 方法或 nativeSetter
+5. 验证: 确认 DOM/状态更新
+
+## Decision Gates
+- **确认点:** 操作前用 web_scan 确认目标元素存在
+- **gate:** findCompByEl 返回 null 时，尝试向上查找 8 层父元素
+- **gate:** proxy 方法不存在时，检查 setupState/exposed
+- **进度报告:** 每步操作后 web_scan 验证结果
+
+
 
 ## 问题
 Vue 3 自定义组件（如 OxdSelect）通过 `addEventListener` 绑定事件，JS `dispatchEvent` 产生的事件 `isTrusted: false`，组件不响应。
@@ -198,3 +223,8 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 - OrangeHRM (opensource-demo.orangehrmlive.com) Vue 3 + OXD 组件库
 - 本地 Vue3 + Element Plus + 模拟 Quill/Tiptap 富文本靶场 (2026-05-09)
 - 2026-05-08
+
+## 相关资源
+- 浏览器驱动：`memory/tmwebdriver_sop.md`
+- 浏览器交互：`memory/web_access_sop.md`
+- CDP 工具：`memory/../scripts/cdp_utils.py`

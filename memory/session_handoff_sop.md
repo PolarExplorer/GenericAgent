@@ -1,4 +1,15 @@
 # Session Handoff SOP — 跨会话任务交接
+
+## Struct Header
+- Trigger: 任务预计跨越多个会话，或单次会话无法完成。
+- Inputs: 当前进度、已完成步骤、阻塞项、下一步指令。
+- Outputs: stage_state.json + progress.json + 交接摘要(≤20行) + 验收边界表。
+- Tools: batch_runner.py(进度记录), file_write(摘要/state)。
+- Side effects: 生成stage_state.json/progress.json/error_log.jsonl。
+- Risk: 交接信息不完整导致新会话重复劳动；PID进程已死但未检测。
+- Failure path: 交接摘要缺失→用progress.json+error_log.jsonl重建；PID检测失败→手动确认。
+- Review: stage_state.json存在且含next_action；交接摘要≤20行；验收边界表状态枚举正确。
+
 > 来源：底座项目 6 次「继续任务」每次都要重新探测状态
 > 适用：任何需要跨会话延续的长时间任务
 

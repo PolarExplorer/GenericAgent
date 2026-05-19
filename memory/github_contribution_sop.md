@@ -1,4 +1,17 @@
 # GitHub Contribution SOP
+
+## Struct Header
+- Reader: GA 总控 / subagent
+- When to read: 需要给开源项目提 PR（修 bug / 加功能 / 改文档）时。
+- Trigger: 需要给开源项目提 PR（修 bug / 加功能 / 改文档）；禁用：仅读代码、不需要提交变更时。
+- Inputs: 目标仓库（OWNER/REPO）；相关 Issue（如有）；CONTRIBUTING.md / PULL_REQUEST_TEMPLATE.md 等项目规范；项目测试命令。
+- Outputs: PR（含标题 type: 描述、正文 What/Why/Testing）；分支（fix/xxx / feat/xxx / docs/xxx）；通过 CI 的 commit 链。
+- Tools: `code_run`（bash: gh repo fork / git / npm test / pytest / gh pr status）；`file_read`（CONTRIBUTING.md / README / package.json 等）。
+- Side effects: Fork 仓库；创建分支；推送 commit 到 remote；创建 PR；触发 CI。
+- Risk: 一个 PR 改多件事导致 review 困难；测试没跑就推导致 CI 失败；force push 覆盖 review 历史；PR 描述空白导致被拒；改了代码风格混乱。
+- Failure path: CI 失败 → 查日志 `gh run view --log-failed`，修自己的问题后重推；Review 要改 → 追加 commit + 测试 + push；Review 要求加测试 → 必须加（非可选项）；第 5 轮仍 FAIL → escalate 人工。
+- Review: 测试全部通过（硬门槛）；一个 PR 做一件事；commit message 具体描述改动；PR 正文包含 What/Why/Testing；遵循项目代码风格。
+
 **触发**：需要给开源项目提 PR（修 bug / 加功能 / 改文档）| **禁用**：仅读代码、不需要提交变更时
 **核心原则**：一个 PR 做一件事，测试通过才推，尊重项目规范
 

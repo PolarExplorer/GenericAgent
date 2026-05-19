@@ -1,5 +1,17 @@
 # ljqCtrl 使用与坐标转换 SOP
 
+## Struct Header
+- Reader: GA 总控 / subagent / 需要键鼠操控的脚本
+- When to read: 需要通过 ljqCtrl 执行鼠标点击、按键、找图等 GUI 操作时。
+- Trigger: 需要模拟鼠标点击/移动/双击、键盘按键、找图匹配等 GUI 交互；需要 High-DPI 物理坐标换算。
+- Inputs: 目标窗口标题；逻辑坐标（从 pygetwindow / win32gui 获取）；`ljqCtrl.dpi_scale` 缩放系数；找图模板文件路径（FindBlock）。
+- Outputs: 鼠标/键盘操作完成（Click / Press / MouseDClick / SetCursorPos）；FindBlock 返回 `((center_x, center_y), is_found)`。
+- Tools: `ljqCtrl`（Click / SetCursorPos / Press / FindBlock / MouseDClick）；`pygetwindow`（窗口枚举与激活）；`pyperclip`（文本粘贴）；`win32gui`（ClientToScreen / GetWindowRect）。
+- Side effects: 物理鼠标移动/点击/按键；窗口前台切换。
+- Risk: 传入逻辑坐标而非物理坐标导致偏移；窗口未 activate 就操作导致点击到错误窗口；win32 DPI 坐标陷阱（未 SetProcessDPIAware 时坐标不一致）；GetWindowRect 包含标题栏而截图不含；手动重复计算 dpi_scale。
+- Failure path: 坐标偏移 → 检查是否正确转换物理坐标；点击到错误窗口 → 确认 gw.activate() 已执行；win32 坐标不一致 → 先调 SetProcessDPIAware()；FindBlock 找不到 → 调低 threshold。
+- Review: 一律使用物理坐标（=截图像素坐标）；操作前必须 activate 窗口；禁止 pyautogui；禁止逻辑/物理坐标混用；文本输入用 pyperclip.copy + Ctrl+V。
+
 > **must call update working ckp**：`ljqCtrl一律使用物理坐标｜禁pyautogui｜操作前先gw激活窗口`
 
 ## 0. API 快速参考 (Signatures)

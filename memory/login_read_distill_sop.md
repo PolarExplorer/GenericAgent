@@ -38,8 +38,18 @@
 3. **频率控制**: 写入操作间隔 ≥30秒，避免触发反垃圾机制
 4. **口径一致**: 蒸馏和回复必须基于同一份原始数据
 
+
+**gate:** 读取前确认登录态有效；蒸馏后验证 JSON 结构完整性。
+
+**确认点:** 蒸馏结果写入前，用 `ask_user` 确认关键字段提取是否正确。
+
 ## 常见坑
 
 - 部分平台评论需要 csrf token → 从 cookie/页面中提取
 - 评论内容触发敏感词审核 → 用 AI 检查一遍
 - 热榜数据快速变化 → 读取和写入之间间隔不宜太长
+
+## 相关资源
+- 登录态 fetch：`memory/authenticated_fetch_skill.md`
+- JSON 蒸馏：`memory/llm_json_distill_skill.md`
+- 浏览器 SOP：`memory/web_access_sop.md`

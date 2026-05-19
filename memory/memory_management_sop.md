@@ -1,3 +1,15 @@
+## Struct Header
+- Reader: GA 总控 / 所有写记忆的 SOP / mem_manager / mem_distill
+- When to read: 任何写入 L1/L2/L3 前必须读取；记忆整理/压缩/同步时。
+- Trigger: 准备写入任何记忆层级；记忆整理周期；L1/L2/L3 同步操作。
+- Inputs: 待写入内容；目标层级（L1/L2/L3）；当前记忆状态。
+- Outputs: 写入的记忆内容（patch 级）；同步后的 L1 索引。
+- Tools: `file_read` / `file_patch`（禁止 overwrite/code_run 改记忆）；`file_write` 仅新建。
+- Side effects: 持久性记忆修改，每轮复利；L1 索引同步；git commit。
+- Risk: 无行动不记忆（禁止存储猜测）；记忆修改是持久性伤害；overwrite 导致不可逆；层级混杂降低检索效率。
+- Failure path: 写入错误信息→patch 修正 + 同步 L1；L1 超 30 行→按 memory_cleanup_sop 压缩；层级错放→迁移归位。
+- Review: 四公理合规（行动验证/不可删改/禁易变/最小指针）；L1 ≤30 行；同步规则执行。
+
 ## 0. 核心公理 (Core Axioms - 最高优先级)
 1.  **行动验证原则 (Action-Verified Only)**
     *   **定义**：任何写入 L1/L2/L3 的信息，必须源自**成功的工具调用结果**（如 `shell` 执行成功、`file_read` 确认内容存在、代码运行通过）。

@@ -1,5 +1,16 @@
 # Plan Mode SOP
 
+## Struct Header
+- Trigger: 3步以上有依赖/多文件协同/条件分支/需并行；禁用：1-2步简单任务直接做。
+- Inputs: 任务目标、约束、可用 SOP 索引、环境现状。
+- Outputs: plan.md（含 [✓] 标记的执行步骤）、[VERIFY] 独立验证结果。
+- Tools: handler.enter_plan_mode(), file_read(plan.md), file_patch, subagent（只读探测）。
+- Side effects: 创建 ./plan_XXX/ 工作目录；subagent 探测消耗 token。
+- Risk: 探索态超3轮导致分析瘫痪；需求边界不清直接执行→返工；主agent自己探测污染上下文。
+- Failure path: subagent 启动失败→排查重试最多2次；探索超限→80%确定性即可行动；plan 标记残留→禁止声称完成。
+- Review: 0个 [ ] 残留 + 有工具证据后才可声称完成；必须有 [VERIFY] 独立验证。
+
+
 > 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
 
 ## 🔑速查
