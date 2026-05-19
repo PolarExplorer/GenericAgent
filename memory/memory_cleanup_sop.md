@@ -58,3 +58,6 @@ ROI = (不放这几个词的犯错概率 × 代价) / 每轮词数成本
 - L2 事实：`../memory/global_mem.txt`
 - 元 SOP：`../memory/memory_management_sop.md`
 - 记忆生命周期：`memory/mem_lifecycle.md`
+- 记忆分层：`memory/typed_memory_sop.md`（分类/召回计划/冲突检测）
+- 记忆波动：`memory/memory_volatility_sop.md`（新鲜度/波动性/层混杂扫描）
+- 记忆蒸馏：`memory/mem_distill.md`（L2→L1蒸馏流程）
