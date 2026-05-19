@@ -23,6 +23,7 @@
 - **gate:** proxy 方法不存在时，检查 setupState/exposed
 - **进度报告:** 每步操作后 web_scan 验证结果
 
+- **确认点:** 面对陌生 Vue3 站点时，先用 `ask_user` 确认目标页面 URL 和组件类型再执行探测
 
 
 ## 问题
@@ -152,6 +153,7 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 - 可构造任意类型文件（Blob/ArrayBuffer均可传入File构造器）
 - ⚠ CDP `DOM.setFileInputFiles` 只设files属性不触发事件（Chrome通用行为），DataTransfer+dispatch是唯一纯JS方案
 - ⚠ 确保弹窗/容器已打开再querySelector，否则input不在DOM中
+- **确认点:** 执行 File Upload 操作前，用 `ask_user` 确认文件路径和目标 input 选择器
 
 ## 泛化到其他 Vue3 站点（未逐一验证，思路层面）
 
@@ -228,3 +230,7 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 - 浏览器驱动：`memory/tmwebdriver_sop.md`
 - 浏览器交互：`memory/web_access_sop.md`
 - CDP 工具：`memory/../scripts/cdp_utils.py`
+- 依赖：`web_scan` 探测页面结构，`web_execute_js` 执行 JS 操作
+- 相关工具：`scripts/cdp_utils.py`（CDP 底层操作）、`tmwebdriver_sop.md`（浏览器特殊操作）
+- 上游 SOP：`web_access_sop.md`（联网三层降级策略）
+- 下游应用：表单自动填写、数据采集、UI 自动化测试
