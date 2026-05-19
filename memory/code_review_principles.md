@@ -1,6 +1,42 @@
+---
+type: sop
+title: Code Review Principles
+category: quality
+version: "2.0"
+updated: 2026-05-19
+---
+
+## Struct Header
+- trigger : before committing code, during code review sessions
+- inputs : source code changes, diff
+- outputs : review verdict (pass/revise/reject), improvement suggestions
+- tools : none (text reference only)
+- risk : low — advisory only, does not modify code
+
 # 什么是好的代码
+
 好的代码不是"能跑就行"，而是在长期演化中保持**压缩性、局部性、可组合性与可证伪性**。
 一句话判断：同样的功能，用最小必要的结构实现——概念少，覆盖广，变化不扩散。
+
+## When to Use
+- Reviewing code changes (own or others)
+- Evaluating architecture decisions
+- Refactoring: use as checklist to ensure improvement direction
+- Writing new code: internalize principles 1-5 before coding
+
+## Workflow
+1. **Read diff**: Understand what changed and why
+2. **Apply quick self-check** (4 questions at bottom): fast pass/fail
+3. **Deep review**: Check principles 1-5 (structure), 6-9 (safety), 10-15 (craft)
+4. **Categorize findings**: critical (must fix) vs advisory (nice to have)
+5. **Report**: specific line references, not vague praise
+
+## Checkpoints
+- [ ] Can you change one module without touching others? (Principle 1)
+- [ ] Is reasoning local—no hidden global state? (Principle 2)
+- [ ] Are constraints in code, not just docs? (Principle 6)
+- [ ] All 4 quick self-check questions answered "yes"? (Section at bottom)
+
 ---
 ## 一、模块边界清晰
 每个模块只做一件事，依赖方向稳定，指向抽象而非细节。改 A 不需要连带动 B、C、D，没有循环依赖，没有到处互相 import。
