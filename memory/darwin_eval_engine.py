@@ -379,6 +379,67 @@ def evaluate_d7_d8_llm(text: str, asset_name: str, api_key: str = None,
     except Exception as e:
         return {"D7": None, "D8": None, "error": str(e)}
 
+
+# ── Shared helpers for D8 real test / explore rewrite ─────────────
+def _resolve_api_cfg(api_base, model, config_name):
+    """Resolve API config from mykey or explicit params. Returns dict with api_key, api_base, model."""
+    _mykey_cfg = {}
+    if config_name:
+        try:
+            sys.path.insert(0, r"D:\AI\GenericAgent")
+            import mykey
+            _mykey_cfg = getattr(mykey, config_name, {})
+            if _mykey_cfg:
+                api_key = _mykey_cfg.get('apikey', '')
+                _raw_base = _mykey_cfg.get('apibase', '')
+                api_base = _raw_base.replace('/anthropic', '/v1') if _raw_base else api_base
+                model = _mykey_cfg.get('model', model)
+            else:
+                api_key = os.environ.get("OPENAI_API_KEY", "")
+        except Exception:
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+    else:
+        try:
+            sys.path.insert(0, r"D:\AI\GenericAgent")
+            import mykey
+            _mykey_cfg = getattr(mykey, 'native_oai_config', {})
+            api_key = _mykey_cfg.get('apikey', os.environ.get("OPENAI_API_KEY", ""))
+            if api_base == "https://api.openai.com/v1":
+                api_base = _mykey_cfg.get('apibase', api_base)
+        except Exception:
+            api_key = os.environ.get("OPENAI_API_KEY", "")
+    if model == "gpt-4o-mini" and _mykey_cfg.get('model'):
+        model = _mykey_cfg['model']
+    return {"api_key": api_key, "api_base": api_base, "model": model}
+
+
+def _llm_call(prompt, cfg, max_tokens=800):
+    """Single LLM API call. Returns response text or error string."""
+    import urllib.request, urllib.error
+    payload = {
+        "model": cfg["model"],
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+    }
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {cfg['api_key']}"}
+    req = urllib.request.Request(
+        f"{cfg['api_base'].rstrip('/')}/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        _msg = body["choices"][0]["message"]
+        _out = _msg.get("content", "").strip()
+        if not _out:
+            _out = _msg.get("reasoning_content", "").strip()
+        return _out
+    except Exception as e:
+        return f"[LLM_ERROR: {e}]"
+
 # ── D8 Real Test Execution (子agent with/without skill 对比) ─────────
 # 规范来源: vendor/darwin-skill/SKILL.md L53-64
 # 设计: 用LLM API模拟子agent执行，with_skill vs without_skill对比输出质量
@@ -460,7 +521,7 @@ Score Output B on 3 dimensions (total /10):
 Reply ONLY as JSON:
 {{"intent": <0-4>, "quality": <0-3>, "no_negative": <0-3>, "note": "<brief explanation>"}}"""
 
-        judge_result = _llm_call(judge_prompt, cfg, max_tokens=300)
+        judge_result = _llm_call(judge_prompt, cfg, max_tokens=2000)
         if judge_result:
             m = re.search(r"\{.*\}", judge_result, re.DOTALL)
             if m:
