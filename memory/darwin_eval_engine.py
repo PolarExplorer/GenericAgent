@@ -309,18 +309,41 @@ OUTPUT FORMAT (JSON only, no markdown):
 # ── D7/D8: LLM API evaluator ─────────────────────────────────────
 def evaluate_d7_d8_llm(text: str, asset_name: str, api_key: str = None,
                         api_base: str = "https://api.openai.com/v1",
-                        model: str = "gpt-4o-mini") -> dict:
-    """Call LLM API to score D7 and D8. Returns {"D7": int, "D8": int, "reasons": dict}."""
+                        model: str = "gpt-4o-mini",
+                        config_name: str = None) -> dict:
+    """Call LLM API to score D7 and D8. Returns {"D7": int, "D8": int, "reasons": dict}.
+    
+    config_name: mykey中的配置名(如 'native_claude_config_minimax', 'native_oai_config2').
+                 若指定则从mykey动态加载apikey/apibase/model，忽略api_key/api_base/model参数。
+                 若为None则用显式传入的api_key/api_base/model。
+    """
     import urllib.request, urllib.error
     _mykey_cfg = {}
-    if api_key is None:
+    if config_name:
+        # 动态加载指定配置
+        try:
+            sys.path.insert(0, r"D:\AI\GenericAgent")
+            import mykey
+            _mykey_cfg = getattr(mykey, config_name, {})
+            if not _mykey_cfg:
+                print(f"WARNING: config '{config_name}' not found in mykey, falling back to defaults")
+            else:
+                api_key = _mykey_cfg.get('apikey', api_key)
+                _raw_base = _mykey_cfg.get('apibase', '')
+                # /anthropic → /v1 for OpenAI-compatible endpoints (mimo etc.)
+                api_base = _raw_base.replace('/anthropic', '/v1') if _raw_base else api_base
+                model = _mykey_cfg.get('model', model)
+        except Exception as e:
+            print(f"WARNING: failed to load mykey config '{config_name}': {e}")
+    elif api_key is None:
+        # 无config_name且无显式api_key：用默认native_oai_config
         try:
             sys.path.insert(0, r"D:\AI\GenericAgent")
             import mykey
             _mykey_cfg = getattr(mykey, 'native_oai_config', {})
             api_key = _mykey_cfg.get('apikey', os.environ.get("OPENAI_API_KEY", ""))
-            if api_base == "https://api.openai.com/v1" and _mykey_cfg.get('apibase'):
-                api_base = _mykey_cfg['apibase']
+            if api_base == "https://api.openai.com/v1":
+                api_base = _mykey_cfg.get('apibase', api_base)
         except Exception:
             api_key = os.environ.get("OPENAI_API_KEY", "")
     if model == "gpt-4o-mini" and _mykey_cfg.get('model'):
@@ -330,7 +353,7 @@ def evaluate_d7_d8_llm(text: str, asset_name: str, api_key: str = None,
         "model": model,
         "messages": [{"role": "user", "content": prompt_data["prompt"]}],
         "temperature": 0.1,
-        "max_tokens": 300,
+        "max_tokens": 2000,
     }
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
     req = urllib.request.Request(
@@ -612,7 +635,8 @@ def cmd_full_eval(args):
     print("\nCalling LLM for D7/D8...")
     llm_result = evaluate_d7_d8_llm(
         text, result["asset"],
-        api_base=args.api_base, model=args.model
+        api_base=args.api_base, model=args.model,
+        config_name=getattr(args, "config", None)
     )
     
     if llm_result.get("error"):
@@ -649,7 +673,8 @@ def cmd_full_batch(args):
             text = f.read_text(encoding="utf-8", errors="replace")
             llm_result = evaluate_d7_d8_llm(
                 text, result["asset"],
-                api_base=args.api_base, model=args.model
+                api_base=args.api_base, model=args.model,
+                config_name=getattr(args, "config", None)
             )
             if llm_result.get("error"):
                 result["llm_error"] = llm_result["error"]
@@ -721,6 +746,7 @@ def build_parser():
     s = sub.add_parser("full-eval", help="Full 100-point eval: D1-D6 static + D7-D8 LLM")
     s.add_argument("--asset", required=True)
     s.add_argument("--output", default=None)
+    s.add_argument("--config", default=None, help="mykey config name (e.g. native_claude_config_minimax)")
     s.add_argument("--api-base", default="https://api.openai.com/v1")
     s.add_argument("--model", default="gpt-4o-mini")
     s.set_defaults(func=cmd_full_eval)
@@ -732,6 +758,7 @@ def build_parser():
     s.add_argument("--model", default="gpt-4o-mini")
     s.add_argument("--limit", type=int, default=None, help="Limit number of assets")
     s.add_argument("--delay", type=float, default=1.0, help="Seconds between API calls")
+    s.add_argument("--config", default=None, help="mykey config name (e.g. native_claude_config_minimax)")
     s.set_defaults(func=cmd_full_batch)
     
     return p
