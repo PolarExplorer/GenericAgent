@@ -63,6 +63,7 @@
 - **file_read默认窗口治理** (2026-05-06): 为降低上下文噪声，`file_read.count` 默认从200降到120，硬上限300，并在 PARTIAL 输出提示优先 keyword 或 start+count 续读；同步更新中英文schema与smoke测试。验证: `test_ga_smoke.py`、schema JSON/default检查、LLM1审查(PASS_WITH_RISK无阻塞)、提交`8a94ecd`后短观察样本420行通过默认/续读/keyword/超大count截断，仓库干净。教训: 高频读文件工具优先用默认窗口+续读提示降噪，不继续扩大上下文压缩复杂度。
 - **中文写入策略** (2026-05-15): file_write/file_patch工具参数中的中文会被runtime截断为乱码(U+FFFD)。唯一可靠路径: file_write写含unicode escape的.py脚本→code_run exec执行，由Python解码写入目标文件。已在Bloom/Fowler/Feynman三轮验证通过。
 - **多行插入倒序策略** (2026-05-15): 对同一文件多处插入时，必须按anchor_line降序处理，否则前面的插入会导致后续行号偏移。模式: JSON定义entries(含anchor_line)→insert脚本按anchor降序排列→逐条插入。已在Fowler(12条)/Feynman(8条)验证通过。
+- **约束引擎讨论误报模式** (2026-05-20): GA讨论约束定义时，响应文本自然包含约束关键词触发REG-R020/R023误报。修复: negative_context加`讨论|约束|constraint|review|维护`等讨论上下文术语→pattern匹配但negative_context也匹配→不blocked。MISSING-PS-CAT-TYPE regex有未转义方括号致匹配静默失败。累计20条约束修复(commit 402a320+522c5e4)，dry-run 5/5通过。教训: **修改regex后必须验证编译+dry-run**；讨论约束定义的场景需在negative_context中显式豁免。
 
 ## [GitHub] <!-- updated: 2026-04-25 -->
 - 用户: PolarExplorer, Token: mykey.py GITHUB_TOKEN (ghp_开头, scopes: repo+read:org)
@@ -126,9 +127,9 @@
 - ADB: ga_adb.py (status/screenshot/tap/text) — 手机ADB操作(需adb已安装)
 - 使用: python scripts/ga_xxx.py subcommand [args]
 
-## [约束引擎接入] <!-- updated: 2026-05-05 -->
+## [约束引擎接入] <!-- updated: 2026-05-20 -->
 - 引擎模块: ga_constraint_engine.py (evaluate_all/evaluate_constraint/load_constraints)
-- DSL文件: GA_ROOT/assets/constraints_dsl.json (68条约束定义, dict顶层结构dsl["constraints"])
+- DSL文件: GA_ROOT/assets/constraints_dsl.json (70条约束定义, dict顶层结构dsl["constraints"])
 - 接入点: ga.py turn_end_callback (L524-551)，Monitor模式
 - 调用流程: load_constraints(path)→evaluate_all(constraints, ctx)→过滤status=fail→注入next_prompt警告
 - ctx字段: history/response_text/tool_calls/scripts/user_message
@@ -264,3 +265,16 @@
 - Edge cookie DB lock: Edge running time completely locks `Cookies` SQLite DB (WinError 32 / PermissionError); Python shutil.copy/raw open/SQLite immutable URI/yt-dlp --cookies-from-browser ALL fail; only workaround: user manually copies cookie value from DevTools (F12 > Application > Cookies)
 - bilibili 1080P: requires SESSDATA cookie (HttpOnly, DevTools only); tool: `memory/bilibili_dl.py` (yt-dlp + Netscape cookie file + ffmpeg merge)
 - default download dir: `E:\xiazai` (user preference; bilibili_dl.py default output_dir)
+
+## [Z-Library Skill] <!-- added: 2026-05-20 -->
+- 脚本: `memory/skills/zlibrary_skill.py` (451行, DrissionPage+Edge)
+- 下载目录: `E:\xiazai\zlibrary` (自动创建)
+- Edge user-data-dir: `D:\AI\GenericAgent\temp\zlibrary_edge_profile` (隔离个人浏览器)
+- 凭据: mykey.py ZLIB_USER/ZLIB_PASS
+- **关键坑点**(反复失败才成功的):
+  - DrissionPage不能自己launch Edge(端口冲突)→必须手动subprocess启动+port 19222
+  - `--remote-allow-origins=*`是CDP WebSocket连接的必需参数(否则403)
+  - TurnstilePatch扩展导致Edge崩溃→不带扩展启动，连上后注入反检测JS
+  - 残留Edge进程锁定user-data-dir→必须先`taskkill /F /IM msedge.exe`再启动
+  - port 9222会与用户个人浏览器冲突→用19222
+  - Z-Library有每日下载限制(服务端"Download limit reached"，非代码问题，约24h重置)

@@ -1523,6 +1523,12 @@ class InputArea(TextArea):
                 choice.action_select(); event.stop(); event.prevent_default(); return
             if event.key == "escape":
                 self.app._cancel_choice(choice.msg); event.stop(); event.prevent_default(); return
+        # 2b) IME composition pass-through — when an IME (e.g. Microsoft Pinyin)
+        #     is composing, let character events reach the underlying TextArea
+        #     unconditionally so Chinese/Japanese input works on Windows.
+        if getattr(event, 'is_composing', False):
+            await super()._on_key(event)
+            return
         # 3) history browse: only at (0,0) for up / end-of-text for down, so in-line
         #    cursor movement is preserved.
         if event.key == "up" and self.cursor_location == (0, 0):
@@ -2115,7 +2121,7 @@ class GenericAgentTUI(App[None]):
         # CSS `#planbar { display: none }` keeps it hidden by default —
         # the renderer flips it on once items materialize.
         self.query_one("#input", InputArea).focus()
-        self.set_interval(0.5, self._tick)
+        self.set_interval(1.0, self._tick)
         self._patch_auto_scroll_for_selection()
         self._start_plan_watcher()
         self._start_tip_rotator()
@@ -2308,6 +2314,16 @@ class GenericAgentTUI(App[None]):
             except Exception: pass
             self._disarm_quit()
             return
+        # --- NEW: try terminal/system clipboard before quitting ---
+        # When user has selected text via terminal-native selection (before
+        # Textual captured input), we can't detect it.  But we can at least
+        # try reading whatever the system clipboard already contains and,
+        # if non-empty, simply exit so the user can paste normally.
+        # If clipboard is empty or contains the same data, proceed to quit.
+        try:
+            _clip = self._get_system_clipboard()
+        except Exception:
+            _clip = None
         sess = self.sessions.get(self.current_id)
         if sess is not None and sess.status == "running":
             self._cmd_stop([], "")
@@ -2326,6 +2342,19 @@ class GenericAgentTUI(App[None]):
             try: self._quit_timer.stop()
             except Exception: pass
         self._quit_timer = self.set_timer(2.0, self._disarm_quit)
+
+    @staticmethod
+    def _get_system_clipboard() -> str:
+        """Best-effort read of the OS clipboard (no external deps)."""
+        try:
+            import tkinter as _tk
+            _r = _tk.Tk(); _r.withdraw()
+            try:
+                return _r.clipboard_get() or ""
+            finally:
+                _r.destroy()
+        except Exception:
+            return ""
 
     def _disarm_quit(self) -> None:
         if not self._quit_armed and self._quit_timer is None:
@@ -3099,6 +3128,7 @@ class GenericAgentTUI(App[None]):
         if args:
             try:
                 sess.agent.next_llm(int(args[0]))
+                sess.agent.baseline_llm_no = sess.agent.llm_no
                 self._system(f"Switched model to #{int(args[0])}.")
             except Exception as e:
                 self._system(f"Switch failed: {e}")
