@@ -64,3 +64,7 @@
 - 登录态 fetch：`memory/authenticated_fetch_skill.md`
 - JSON 蒸馏：`memory/llm_json_distill_skill.md`
 - 飞书 CLI：`memory/../scripts/ga_diag_api.py`（参考 API 模式）
+- 工具脚本：`memory/../scripts/ga_diag_api.py`（API 诊断模式参考）
+- 依赖：需要 `authenticated_fetch_skill` 提供登录态
+- 依赖：需要 `llm_json_distill_skill` 提供 LLM JSON 蒸馏
+- 上游触发：`darwin_maintenance_sop` 批量评估后可调用本 SOP 做数据重组
