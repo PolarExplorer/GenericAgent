@@ -638,6 +638,30 @@
         "type": "manual"
       },
       "enabled": true
+    },
+    {
+      "id": "MISSING-TURN-RECAP",
+      "name": "复杂任务中间步骤建议recap进度",
+      "category": "workflow",
+      "detection": {
+        "type": "manual",
+        "description": "多步骤任务建议每3-5步recap一次进度"
+      },
+      "source": "constraints_dsl.json",
+      "priority": "low",
+      "active": true
+    },
+    {
+      "id": "REG-R027",
+      "name": "避免无进展的重复操作",
+      "category": "workflow",
+      "detection": {
+        "type": "manual",
+        "description": "同一操作失败后应换方案而非重试"
+      },
+      "source": "constraints_dsl.json",
+      "priority": "low",
+      "active": true
     }
   ],
   "rules": [

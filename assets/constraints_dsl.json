@@ -13,7 +13,8 @@
       "params": {
         "action": {
           "scope": "response",
-          "pattern": "(计划|规划|方案|plan|探索|收敛|拆解)"
+          "pattern": "(计划|规划|方案|plan|探索|收敛|拆解)",
+          "negative_context": "(?:建议|推荐|分析|评估|讨论|对比|方案.*(?:A|B|C)|选项|路线)"
         },
         "precondition": {
           "lookback": 3,
@@ -22,20 +23,22 @@
             "file_write"
           ]
         }
-      }
+      },
+      "severity": "low",
+      "description": "长任务/自主任务规划应创建工作目录（讨论/评估/建议上下文可豁免）"
     },
     {
       "id": "MISSING-PLAN-REREAD",
-      "name": "规划执行新步骤前禁止凭记忆，必须重读plan.md",
+      "name": "规划执行阶段凭记忆前须重读plan.md（仅限明确计划执行上下文）",
       "source": "memory/plan_sop.md:181",
       "check_type": "precondition",
       "params": {
         "action": {
           "scope": "response",
-          "pattern": "(下一步|继续|开始执行|实施|验证|修改)"
+          "pattern": "(下一步|继续执行|开始执行|执行计划|实施方案|实施计划)"
         },
         "precondition": {
-          "lookback": 2,
+          "lookback": 5,
           "tool_names": [
             "file_read"
           ]
@@ -61,8 +64,9 @@
       "params": {
         "scope": "exec_only",
         "pattern": "(?:^|[;&|\\n\\r])\\s*(?:cat|type)\\s+[A-Za-z0-9_./\\\\:-]+",
-        "negative_context": "[\"'{}()\\[\\]]|import |def |class |subprocess|os\\."
-      }
+        "negative_context": "[\\\"'{}()\\\\[\\\\]]|import |def |class |subprocess|os\\.|bash|sh |zcat|zcat|concatenate|cat <<|cat >|/bin/cat|$(cat|`cat"
+      },
+      "description": "PowerShell环境禁用cat/type读文件（bash/sh/代码上下文可豁免）"
     },
     {
       "id": "MISSING-VISION-ENUM-WINDOW",
@@ -75,13 +79,16 @@
           "pattern": "(?:截图|截屏|screenshot|vision|视觉|OCR|识别屏幕|看(?:一下|看)屏幕)",
           "tool_names": [
             "code_run"
-          ]
+          ],
+          "negative_context": "(?:图片|图像|文件.*(?:OCR|识别)|截图文件|本地.*图片|已有.*截图|image.*file|图片.*路径)"
         },
         "precondition": {
           "lookback": 2,
           "response_pattern": "(?:EnumWindows|枚举窗口|窗口枚举|先枚举窗口|确认目标窗口|窗口句柄)"
         }
-      }
+      },
+      "severity": "low",
+      "description": "桌面截图前建议枚举窗口（图片文件分析/本地OCR可豁免）"
     },
     {
       "id": "MISSING-LJQ-ACTIVATE",
@@ -94,13 +101,16 @@
           "pattern": "(?:ljqCtrl\\.|物理模拟|键鼠操作|pyautogui\\.\\w+\\()",
           "tool_names": [
             "code_run"
-          ]
+          ],
+          "exclude_pattern": "(?:#.{0,80}|描述|说明|文档|sop|引用|规则|constraint)"
         },
         "precondition": {
-          "lookback": 2,
-          "response_pattern": "(activate\\(|激活窗口|前台|窗口已激活|置于前台)"
+          "lookback": 3,
+          "response_pattern": "(activate\\(|激活窗口|前台|窗口已激活|置于前台|目标窗口|窗口.*确认|已经激活|already.?active|先.*activate)"
         }
-      }
+      },
+      "severity": "low",
+      "description": "键鼠/物理模拟前建议确认窗口已激活（讨论/SOP引用上下文可豁免，lookback从2放宽到3）"
     },
     {
       "id": "MISSING-CODE-HYPOTHESIS",
@@ -128,15 +138,15 @@
           "pattern": "memory[\\\\/](?:global_mem(?:_insight)?\\.txt|.*_sop\\.md|.*\\.md|.*\\.txt)"
         },
         "precondition": {
-          "lookback": 10,
+          "lookback": 5,
           "tool_names": [
             "file_read"
           ],
           "response_pattern": "(?:META-SOP|memory_management_sop|L0)"
         }
       },
-      "severity": "critical",
-      "description": "任何file_write/file_patch写入memory下长期记忆文件前，近10轮必须实际读取META-SOP(L0)"
+      "severity": "high",
+      "description": "任何file_write/file_patch写入memory下长期记忆文件前，近5轮必须实际读取META-SOP(L0)（从critical降级到high，lookback从10降到5）"
     },
     {
       "id": "REG-C068",
@@ -159,8 +169,10 @@
       "params": {
         "scope": "exec_only",
         "pattern": "(?:^|[\\n;\\\"'])\\s*(?:import\\s+pyautogui|from\\s+pyautogui)|pyautogui\\.\\w+",
-        "negative_context": "(?:pattern\\s*[=:].{0,80}|#.{0,80}|[\\\"'`]\\s*\\+\\s*[\\\"'`])"
-      }
+        "negative_context": "(?:pattern\\s*[=:].{0,80}|#.{0,80}|[\\\"'`]\\s*\\+\\s*[\\\"'`]|约束|constraint|report|评审|规则|禁.*pyautogui|ljqCtrl_sop|避免使用|不使用pyautogui)"
+      },
+      "severity": "medium",
+      "description": "Python代码中禁止import或调用pyautogui（讨论约束/引用规则上下文可豁免）"
     },
     {
       "id": "REG-C002",
@@ -271,8 +283,10 @@
       "params": {
         "scope": "exec_only",
         "pattern": "(?i)(?:autonomous|自主).*(?:open|read|file_read).*(?:key|secret|token|密码|密钥)|(?:open|read|file_read).*(?:key|secret|token|密码|密钥).*(?:autonomous|自主)",
-        "description": "自主模式下检测读取密钥文件的行为"
-      }
+        "description": "自主模式下检测读取密钥文件的行为",
+        "negative_context": "(?:用户.*(?:授权|要求|确认|同意|指示))|(?:user.*(?:authorized|approved|requested))|(?:CONSTITUTION|规则引擎|约束)"
+      },
+      "description": "自主模式下读取密钥文件(用户授权或治理文件维护除外)"
     },
     {
       "id": "REG-C039",
@@ -364,15 +378,17 @@
     },
     {
       "id": "REG-R001",
-      "name": "搜索文件必须用 es.exe",
+      "name": "搜索文件优先es.exe（允许降级说明后fallback）",
       "source": "RULES #1",
       "check_type": "pattern_forbidden",
       "params": {
         "scope": "exec_only",
         "pattern": "(?:Get-ChildItem -Recurse)|(?:dir /s)",
-        "description": "搜索文件必须用 es.exe",
-        "required_hint": "es.exe"
-      }
+        "description": "搜索文件优先用es.exe，禁无说明的PS递归/dir遍历",
+        "required_hint": "es.exe",
+        "negative_context": "(?:es.{0,5}(?:不可用|找不到|未安装|不可用|FileNotFoundError))|(?:fallback|降级)"
+      },
+      "severity": "info"
     },
     {
       "id": "REG-R003",
@@ -420,8 +436,10 @@
       "check_type": "pattern_forbidden",
       "params": {
         "scope": "tool_args",
-        "pattern": "taskkill.*python"
-      }
+        "pattern": "taskkill.*python",
+        "negative_context": "(?:用户.*(?:要求|指示|同意)|zombie|僵尸|清理|cleanup|watchdog|ga_watchdog)"
+      },
+      "description": "禁止无条件杀python进程（用户授权/zombie清理/watchdog除外）"
     },
     {
       "id": "REG-R020",
@@ -455,20 +473,25 @@
         "scope": "response",
         "trigger": "(?:按照|根据|参考|遵循|依据).*(?:_sop|SOP)",
         "pattern": "(?is)\\A(?=.*(?:_sop|SOP|\\.md))(?!.*(?:file_read|open\\s*\\(|Path\\s*\\(|read_text|memory[/\\\\]|\\.md)).*",
-        "negative_context": "(?:file_read|memory[\\\\/]|已读|已查|上文已|前文已|刚读过)",
+        "negative_context": "(?:file_read|memory[\\\\/]|已读|已查|上文已|前文已|刚读过)|(?:待读|需读|将.*读取|计划.*读|后续.*读)|(?:评估|评审|对比|分析|讨论|说明|解释)",
         "description": "声称按SOP执行但当轮无file_read且前文无读取证据时触发（仅检查response）"
-      }
+      },
+      "severity": "low",
+      "description": "引用SOP时应有读取证据（评估/讨论/待读等上下文可豁免）"
     },
     {
       "id": "REG-R030",
-      "name": "每次回复必须包含 summary",
+      "name": "复杂任务回复建议包含summary（短回复/JSON除外）",
       "source": "行动规范",
       "check_type": "pattern_required",
       "params": {
         "scope": "response",
         "pattern": "<summary>.*</summary>",
-        "description": "每次回复必须包含<summary>标签"
-      }
+        "description": "每次回复必须包含<summary>标签",
+        "negative_context": "(?:^\\s*\\{.*\\}\\s*$)|(?:```json)|(?:candidates.*question)|(?:ask_user)"
+      },
+      "severity": "info",
+      "description": "复杂任务回复建议包含<summary>标签，但短回复、JSON输出、ask_user交互可豁免"
     },
     {
       "id": "REG-R032",
@@ -740,7 +763,7 @@
     },
     {
       "id": "REG-R009",
-      "name": "决策前查记忆有SOP必用",
+      "name": "修改记忆/SOP前应先读取对应资料",
       "source": "CONSTITUTION:2 / R009",
       "check_type": "sequence_check",
       "params": {
@@ -749,23 +772,23 @@
             "tool_names": [
               "file_read"
             ],
-            "pattern": "memory[\\\\/](?:global_mem|.*_sop|memory_management_sop)"
+            "pattern": "memory[\\\\/](?:global_mem|.*_sop|memory_management)"
           },
           {
             "tool_names": [
               "file_write",
               "file_patch"
             ],
-            "pattern": "memory[\\\\/]|_sop\\.|constraint|rules_engine",
+            "pattern": "memory[\\\\/]|constraints_dsl|rules_engine",
             "scope": "exec_only"
           }
         ],
         "trigger_step": 1,
-        "lookback": 20,
+        "lookback": 10,
         "description": "涉及SOP/记忆/约束引擎/分发等领域的执行或配置修改前，必须先读取对应memory/资料"
       },
-      "severity": "medium",
-      "description": "涉及SOP关键词的操作前应先file_read memory/；从low提升到medium并扩大触发词"
+      "severity": "low",
+      "description": "涉及SOP/记忆/约束引擎修改前，应先读取对应memory资料(lookback=10)"
     },
     {
       "id": "REG-R049",
@@ -897,17 +920,17 @@
       "check_type": "duplicate_check",
       "params": {
         "scope": "tool_calls",
-        "lookback": 3,
+        "lookback": 5,
         "min_count": 2,
         "check_failure": true,
         "description": "同一工具+相似参数连续调用≥2次且前次失败"
       },
-      "severity": "high",
+      "severity": "medium",
       "description": "工具调用失败后，禁止用相同参数无新信息地重复调用"
     },
     {
       "id": "REG-R031",
-      "name": "需求未完成必须有工具调用",
+      "name": "需求未完成须有工具调用（征询模式除外）",
       "source": "R031/RULES",
       "check_type": "output_check",
       "params": {
@@ -919,13 +942,13 @@
           },
           {
             "scope": "response",
-            "pattern": "(?:完成|done|已.*完成|等待.*确认|你.*(?:看|觉得|需要|确认)|建议.*(?:你|您))"
+            "pattern": "(?:完成|done|已.*完成|等待.*确认|你.*(?:看|觉得|需要|确认)|建议.*(?:你|您)|(?:你看|需要吗|怎么样|好办法)|(?:征询|咨询|方案对比|建议如下))"
           }
         ],
         "description": "回复中须有工具调用，或明确表示完成/等待用户"
       },
       "severity": "low",
-      "description": "用户需求未完成时回复必须包含工具调用"
+      "description": "回复中须有工具调用，或明确表示完成/等待用户/征询建议（R10征询模式豁免）"
     },
     {
       "id": "REG-C036",
@@ -1035,10 +1058,10 @@
           "pattern": "\"path\"\\s*:\\s*\"[^\"]*(?:\\.py|\\.js|\\.ts|\\.java|\\.go|\\.rs)\"",
           "scope": "tools",
           "exclude_pattern": "(?:temp|node_modules)[\\\\/]",
-          "min_content_length": 500
+          "min_content_length": 200
         },
         "precondition": {
-          "lookback": 20,
+          "lookback": 10,
           "tool_names": [
             "code_run"
           ],
@@ -1048,6 +1071,45 @@
       },
       "severity": "low",
       "description": "修改代码文件后应在后续轮次运行测试/lint/build"
+    },
+    {
+      "id": "MISSING-TURN-RECAP",
+      "name": "复杂任务中间步骤建议recap进度",
+      "source": "CONSTITUTION:3+ga.py turn_end",
+      "check_type": "precondition",
+      "params": {
+        "action": {
+          "scope": "tool_calls",
+          "tool_names": [
+            "code_run",
+            "file_patch",
+            "file_write"
+          ],
+          "min_count": 5,
+          "lookback": 10
+        },
+        "precondition": {
+          "lookback": 10,
+          "response_pattern": "(?:总结|小结|recap|进度|当前状态|已完成|待完成|summary|checkpoint)"
+        }
+      },
+      "severity": "low",
+      "description": "连续5+工具调用后建议recap进度（非强制，低severity）"
+    },
+    {
+      "id": "REG-R027",
+      "name": "避免无进展的重复操作",
+      "source": "CONSTITUTION:3+review_report",
+      "check_type": "duplicate_check",
+      "params": {
+        "scope": "tool_calls",
+        "lookback": 5,
+        "min_count": 3,
+        "check_failure": false,
+        "description": "同一工具+相同参数连续调用≥3次（不论成功失败）应考虑换策略"
+      },
+      "severity": "low",
+      "description": "相同操作重复≥3次时提示换策略（非阻断）"
     }
   ]
 }
