@@ -64,7 +64,7 @@
       "params": {
         "scope": "exec_only",
         "pattern": "(?:^|[;&|\\n\\r])\\s*(?:cat|type)\\s+[A-Za-z0-9_./\\\\:-]+",
-        "negative_context": "[\\\"'{}()\\\\[\\\\]]|import |def |class |subprocess|os\\.|bash|sh |zcat|zcat|concatenate|cat <<|cat >|/bin/cat|$(cat|`cat"
+        "negative_context": "[\"'{}()\\\\[\\\\]]|import |def |class |subprocess|os\\.|bash|sh |zcat|concatenate|cat <<|cat >|/bin/cat|\\$\\(cat|`cat|test_|#|约束|report|规则"
       },
       "description": "PowerShell环境禁用cat/type读文件（bash/sh/代码上下文可豁免）"
     },
@@ -450,7 +450,7 @@
         "scope": "exec_only",
         "pattern": "(?is)\\A(?=.*(?:screenshot|GetForegroundWindow|FindWindow|SetForegroundWindow|click_at|mouse_click|pyautogui\\..*click|ljqCtrl|窗口操作|前台窗口|activate.*window))(?!.*(?:EnumWindows|win32gui|GetWindowText|枚举窗口|窗口标题)).*",
         "description": "检测GUI/窗口状态操作缺窗口标题枚举证据",
-        "negative_context": "(?:html|javascript|js|web_execute|innerHTML|querySelector|addEventListener|button|href|onclick|import\\s+json|import\\s+re|open\\s*\\(|test_dsl|def\\s+test_|findstr|constraints_dsl)"
+        "negative_context": "(?:html|javascript|js|web_execute|innerHTML|querySelector|addEventListener|button|href|onclick|import\\s+json|import\\s+re|open\\s*\\(|test_dsl|def\\s+test_|findstr|constraints_dsl)|约束|constraint|report|评审|讨论|定义|规则|引擎|检查|修改|维护|条约束|约束定义|误报"
       }
     },
     {
