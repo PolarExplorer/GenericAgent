@@ -379,6 +379,146 @@ def evaluate_d7_d8_llm(text: str, asset_name: str, api_key: str = None,
     except Exception as e:
         return {"D7": None, "D8": None, "error": str(e)}
 
+# ── D8 Real Test Execution (子agent with/without skill 对比) ─────────
+# 规范来源: vendor/darwin-skill/SKILL.md L53-64
+# 设计: 用LLM API模拟子agent执行，with_skill vs without_skill对比输出质量
+
+def run_d8_real_test(
+    asset_path: Path,
+    test_prompts: list,
+    api_base: str = "https://api.openai.com/v1",
+    model: str = "gpt-4o-mini",
+    config_name: str = None,
+) -> dict:
+    """Run real D8 test: generate output with/without skill, compare quality.
+
+    Args:
+        asset_path: Path to the SKILL.md being tested.
+        test_prompts: List of prompt strings (typically 2-3).
+        api_base: LLM API base URL.
+        model: Model name.
+        config_name: Optional mykey config override.
+
+    Returns:
+        {"score": 1-10, "mode": "real_test", "details": [...]}
+        On failure: {"score": None, "mode": "dry_run", "reason": "..."}
+    """
+    if not test_prompts:
+        return {"score": None, "mode": "dry_run", "reason": "no test prompts"}
+
+    try:
+        skill_text = asset_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {"score": None, "mode": "dry_run", "reason": f"cannot read asset: {e}"}
+
+    cfg = _resolve_api_cfg(api_base, model, config_name)
+    details = []
+    scores = []
+
+    for i, prompt in enumerate(test_prompts):
+        # Step 1: Generate baseline output (without skill)
+        baseline_prompt = (
+            f"You are a helpful assistant. A user asks:\n\n"
+            f"User: {prompt}\n\n"
+            f"Respond with your best output."
+        )
+        baseline_output = _llm_call(baseline_prompt, cfg, max_tokens=800)
+
+        # Step 2: Generate output WITH skill
+        with_skill_prompt = (
+            f"You are a helpful assistant with the following skill/SOP loaded:\n\n"
+            f"=== SKILL START ===\n{skill_text}\n=== SKILL END ===\n\n"
+            f"Now a user asks:\n\nUser: {prompt}\n\n"
+            f"Follow the skill instructions to produce your output."
+        )
+        skill_output = _llm_call(with_skill_prompt, cfg, max_tokens=800)
+
+        if not baseline_output or not skill_output:
+            details.append({
+                "prompt_idx": i, "prompt": prompt[:80],
+                "error": "LLM call failed", "baseline_len": len(baseline_output or ""),
+                "skill_len": len(skill_output or ""),
+            })
+            continue
+
+        # Step 3: Compare outputs via LLM judge
+        judge_prompt = f"""Compare two AI outputs for the same user request.
+
+User request: {prompt}
+
+--- Output A (WITHOUT skill guidance) ---
+{baseline_output[:2000]}
+
+--- Output B (WITH skill guidance) ---
+{skill_output[:2000]}
+
+Score Output B on 3 dimensions (total /10):
+1. Does B complete the user intent? (0-4)
+2. Is B quality better or equal to A? (0-3: 3=clearly better, 2=similar, 1=worse, 0=much worse)
+3. Does B have negative side effects (over-complication, hallucination, format issues)? (0-3: 3=none, 2=minor, 1=significant, 0=severe)
+
+Reply ONLY as JSON:
+{{"intent": <0-4>, "quality": <0-3>, "no_negative": <0-3>, "note": "<brief explanation>"}}"""
+
+        judge_result = _llm_call(judge_prompt, cfg, max_tokens=300)
+        if judge_result:
+            m = re.search(r"\{.*\}", judge_result, re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group())
+                    total = (
+                        parsed.get("intent", 2)
+                        + parsed.get("quality", 1)
+                        + parsed.get("no_negative", 1)
+                    )
+                    total = max(1, min(10, total))
+                    scores.append(total)
+                    details.append({
+                        "prompt_idx": i, "prompt": prompt[:80],
+                        "score": total,
+                        "intent": parsed.get("intent"), "quality": parsed.get("quality"),
+                        "no_negative": parsed.get("no_negative"),
+                        "note": parsed.get("note", ""),
+                        "baseline_len": len(baseline_output),
+                        "skill_len": len(skill_output),
+                    })
+                except json.JSONDecodeError:
+                    details.append({"prompt_idx": i, "prompt": prompt[:80], "error": "judge json parse fail"})
+            else:
+                details.append({"prompt_idx": i, "prompt": prompt[:80], "error": "judge no json"})
+        else:
+            details.append({"prompt_idx": i, "prompt": prompt[:80], "error": "judge call fail"})
+
+    if scores:
+        avg_score = round(sum(scores) / len(scores), 1)
+        return {"score": avg_score, "mode": "real_test", "details": details}
+    else:
+        return {"score": None, "mode": "dry_run", "reason": "all test rounds failed", "details": details}
+
+
+def load_test_prompts(asset_path: Path) -> list:
+    """Load test prompts for an asset. Checks {name}-test-prompts.json first."""
+    # Check .darwin/test-prompts/{stem}.json
+    darwin_dir = asset_path.parent.parent / ".darwin" / "test-prompts"
+    candidates = [
+        darwin_dir / f"{asset_path.stem}.json",
+        darwin_dir / f"{asset_path.stem}-test-prompts.json",
+        asset_path.parent / f"{asset_path.stem}-test-prompts.json",
+    ]
+    for c in candidates:
+        if c.exists():
+            try:
+                data = json.loads(c.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return data
+                if isinstance(data, dict) and "prompts" in data:
+                    return data["prompts"]
+            except Exception:
+                pass
+    return []
+
+
+# ──────────────────────────────────────────────────────────────────
 
 # ── Asset classification ──────────────────────────────────────────
 def classify_asset(filepath: Path) -> str:
@@ -653,6 +793,175 @@ def cmd_full_eval(args):
         print(f"\nSaved to {out}")
 
 
+def cmd_real_test(args):
+    """Run D8 real test: with/without skill LLM comparison."""
+    fp = Path(args.asset)
+    if not fp.exists():
+        print(f"ERROR: file not found: {fp}")
+        sys.exit(1)
+
+    # Load test prompts
+    prompts = []
+    if args.test_prompt:
+        prompts = [args.test_prompt]
+    else:
+        prompts = load_test_prompts(fp)
+
+    if not prompts:
+        print("WARNING: No test prompts found. Trying LLM to generate them...")
+        cfg = _resolve_api_cfg(args.api_base, args.model, getattr(args, "config", None))
+        skill_text = fp.read_text(encoding="utf-8", errors="replace")
+        gen_prompt = (
+            "Given this SOP/skill, generate 2-3 typical user prompts that would test "
+            "its core value. Each prompt should be a realistic task a user would ask.\n\n"
+            f"Skill name: {fp.name}\n"
+            f"Skill content (first 2000 chars):\n{skill_text[:2000]}\n\n"
+            "Reply ONLY as JSON array of strings: [\"prompt1\", \"prompt2\", ...]"
+        )
+        raw = _llm_call(gen_prompt, cfg, max_tokens=500)
+        if raw:
+            import re as _re
+            m = _re.search(r"\[.*\]", raw, _re.DOTALL)
+            if m:
+                try:
+                    prompts = json.loads(m.group())
+                    print(f"  Generated {len(prompts)} test prompts from LLM")
+                except json.JSONDecodeError:
+                    pass
+
+    if not prompts:
+        print("ERROR: No test prompts available. Use --test-prompt or create {name}-test-prompts.json")
+        sys.exit(1)
+
+    print(f"Running D8 real test on: {fp.name}")
+    print(f"  Test prompts: {len(prompts)}")
+    for i, p in enumerate(prompts):
+        print(f"    [{i}] {p[:100]}")
+
+    result = run_d8_real_test(
+        fp, prompts,
+        api_base=args.api_base, model=args.model,
+        config_name=getattr(args, "config", None),
+    )
+
+    mode = result.get("mode", "unknown")
+    score = result.get("score")
+    print(f"\nResult: mode={mode}  score={score}/10")
+
+    if mode == "dry_run":
+        print(f"  Reason: {result.get('reason', 'unknown')}")
+        print("  TIP: Use --test-prompt or create {name}-test-prompts.json for real testing")
+    else:
+        for d in result.get("details", []):
+            idx = d.get("prompt_idx", "?")
+            s = d.get("score", "-")
+            note = d.get("note", d.get("error", ""))
+            print(f"    [{idx}] score={s}/10  {note}")
+
+    if args.output:
+        out = Path(args.output)
+        out.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\nSaved to {out}")
+
+
+def cmd_explore_rewrite(args):
+    """Phase 2.5: Exploratory rewrite when hill-climbing is stuck."""
+    fp = Path(args.asset)
+    if not fp.exists():
+        print(f"ERROR: file not found: {fp}")
+        sys.exit(1)
+
+    cfg = _resolve_api_cfg(args.api_base, args.model, getattr(args, "config", None))
+
+    # Read current content
+    current = fp.read_text(encoding="utf-8", errors="replace")
+    asset_name = fp.stem
+    asset_type = classify_asset(fp)
+
+    print(f"Phase 2.5 Exploratory Rewrite: {fp.name} [{asset_type}]")
+    print(f"  Current length: {len(current)} chars")
+
+    # Get baseline score (existing D1-D6 static)
+    baseline_result = evaluate_asset(fp)
+    baseline_score = baseline_result["static_score"]
+    print(f"  Baseline static score: {baseline_score}/{baseline_result['max_static']}")
+
+    # LLM exploratory rewrite
+    rewrite_prompt = f"""You are a SOP/Tool rewriting expert. The following {asset_type} has been stuck
+at a score of {baseline_score}/60 after multiple optimization rounds.
+Your task is a FULL EXPLORATORY REWRITE: decompose and rebuild from scratch,
+not just incremental tweaks.
+
+Guidelines:
+- Maintain the same core purpose and all critical information
+- But restructure, add missing sections, improve clarity
+- For SOPs: ensure action_steps are concrete with verification methods
+- For tools: ensure functions have docstrings, type hints, and examples
+- Keep file references accurate (do not invent paths)
+
+Current content:
+{current}
+
+Write the COMPLETE rewritten file. Output ONLY the raw file content, no markdown fences."""
+
+    new_content = _llm_call(rewrite_prompt, cfg, max_tokens=4000)
+    if not new_content:
+        print("ERROR: LLM call failed for rewrite")
+        sys.exit(1)
+
+    # Clean up common LLM artifacts
+    new_content = new_content.strip()
+    if new_content.startswith("```"):
+        # Remove markdown fences
+        lines = new_content.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        new_content = "\n".join(lines)
+
+    print(f"  Rewrite length: {len(new_content)} chars")
+
+    # Stash current version
+    stash_dir = fp.parent / ".darwin" / "rewrite_stash"
+    stash_dir.mkdir(parents=True, exist_ok=True)
+    import datetime
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    stash_path = stash_dir / f"{asset_name}_{ts}.md.bak"
+    stash_path.write_text(current, encoding="utf-8")
+    print(f"  Stashed original to: {stash_path}")
+
+    # Write new version temporarily and evaluate
+    temp_path = stash_dir / f"{asset_name}_{ts}_rewrite.md"
+    temp_path.write_text(new_content, encoding="utf-8")
+
+    new_result = evaluate_asset(temp_path)
+    new_score = new_result["static_score"]
+    print(f"  Rewrite static score: {new_score}/{new_result['max_static']}")
+
+    delta = new_score - baseline_score
+    print(f"  Delta: {delta:+.1f}")
+
+    if delta > 0:
+        # Rewrite is better — ask if user wants to adopt
+        print(f"\n  >>> REWRITE IS BETTER (+{delta:.1f}). Adopting.")
+        fp.write_text(new_content, encoding="utf-8")
+        print(f"  >>> {fp.name} updated with rewritten version.")
+        result = {"decision": "adopted", "baseline": baseline_score, "rewrite": new_score, "delta": delta}
+    else:
+        print(f"\n  >>> REWRITE NOT BETTER ({delta:+.1f}). Keeping original.")
+        result = {"decision": "kept_original", "baseline": baseline_score, "rewrite": new_score, "delta": delta}
+
+    result["stash"] = str(stash_path)
+    result["rewrite_temp"] = str(temp_path)
+
+    if args.output:
+        out = Path(args.output)
+        out.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\nSaved to {out}")
+
+
+
 def cmd_full_batch(args):
     """Batch full 100-point evaluation (D1-D6 static + D7-D8 LLM)."""
     mem = Path(args.memory_dir)
@@ -760,6 +1069,26 @@ def build_parser():
     s.add_argument("--delay", type=float, default=1.0, help="Seconds between API calls")
     s.add_argument("--config", default=None, help="mykey config name (e.g. native_claude_config_minimax)")
     s.set_defaults(func=cmd_full_batch)
+
+    # D8 real test: with/without skill comparison
+    s = sub.add_parser("real-test", help="D8 real test: compare output with vs without skill")
+    s.add_argument("--asset", required=True, help="Path to SKILL.md to test")
+    s.add_argument("--test-prompt", default=None, help="Single test prompt string")
+    s.add_argument("--output", default=None)
+    s.add_argument("--config", default=None, help="mykey config name")
+    s.add_argument("--api-base", default="https://api.openai.com/v1")
+    s.add_argument("--model", default="gpt-4o-mini")
+    s.set_defaults(func=cmd_real_test)
+
+    # Phase 2.5: exploratory rewrite
+    s = sub.add_parser("explore-rewrite", help="Phase 2.5: full rewrite when hill-climbing stuck")
+    s.add_argument("--asset", required=True, help="Path to asset to rewrite")
+    s.add_argument("--output", default=None)
+    s.add_argument("--config", default=None, help="mykey config name")
+    s.add_argument("--api-base", default="https://api.openai.com/v1")
+    s.add_argument("--model", default="gpt-4o-mini")
+    s.set_defaults(func=cmd_explore_rewrite)
+
     
     return p
 
