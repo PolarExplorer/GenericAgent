@@ -40,6 +40,86 @@
 
 长期 skill 的核心结论应尽量来自 A/B 证据；C/D 只能作为假设或待验证项。
 
+## 3.1 系统化材料收集（6维度并行）
+
+借鉴nuwa-skill的Agent Swarm设计，每个persona蒸馏必须覆盖以下6个维度。
+
+### 3.1.1 采集维度
+
+| 维度 | 文件名 | 内容 | 优先来源 | 最低量 |
+|------|--------|------|----------|--------|
+| 著作与系统思考 | 01-writings.md | 书籍、博客、论文、公开信 | 本人著作 | ≥5KB |
+| 长对话与即兴思考 | 02-conversations.md | 访谈、播客、Q&A | 完整transcript | ≥5KB |
+| 碎片表达与风格DNA | 03-expression-dna.md | 社交媒体、短评论 | 高频表达模式 | ≥5KB |
+| 他者视角与批评 | 04-external-views.md | 同行评价、媒体报道 | 多来源交叉 | ≥5KB |
+| 决策记录与行动 | 05-decisions.md | 重大决策、公开行动 | 可验证案例 | ≥5KB |
+| 人物时间线 | 06-timeline.md | 生平、关键转折点 | Wikipedia+传记 | ≥5KB |
+
+**总材料量标准**：
+- 最低标准：总计≥30KB（骨架级）
+- 推荐标准：总计≥60KB（可用级）
+- 高质量标准：总计≥120KB（深度级）
+
+### 3.1.2 材料保存结构
+
+所有调研材料保存到：
+```
+memory/skills/persona/<name>-perspective/references/research/
+├── 01-writings.md
+├── 02-conversations.md
+├── 03-expression-dna.md
+├── 04-external-views.md
+├── 05-decisions.md
+└── 06-timeline.md
+```
+
+### 3.1.3 本地语料处理
+
+支持用户提供本地素材，优先级高于网络搜索：
+
+| 类型 | 格式 | 处理工具 |
+|------|------|----------|
+| 字幕文件 | SRT/VTT | `scripts/srt_to_transcript.py` |
+| 音频文件 | MP3/WAV/M4A | `scripts/audio_to_text.py`（需OPENAI_API_KEY） |
+| 视频文件 | MP4/MKV | `scripts/audio_to_text.py`（自动提取音频） |
+| PDF书籍 | PDF | 直接阅读提取 |
+| 演讲transcript | TXT/MD | 直接分析问答模式 |
+
+**处理流程**：
+1. 检查用户是否提供了本地素材
+2. 如有，优先处理本地素材（使用上述工具）
+3. 本地素材不足时，补充网络搜索
+4. 所有材料统一保存到references/research/目录
+
+### 3.1.4 采集策略
+
+**Phase 1: 本地语料处理**（如有）
+- 检查用户提供的所有本地文件
+- 使用对应工具转换为纯文本
+- 按6维度分类保存
+
+**Phase 2: 网络搜索采集**（无本地素材时全部走此路径）
+
+| 维度 | 推荐搜索来源 | 搜索query模板 |
+|------|-------------|---------------|
+| 01-writings | 本人博客、Medium、知乎专栏、出版物 | `"<人物名>" blog / writings / publications` |
+| 02-conversations | YouTube、播客、B站、访谈节目 | `"<人物名>" interview / podcast / conversation transcript` |
+| 03-expression-dna | Twitter/X、微博、LinkedIn、论坛 | `"<人物名>" twitter / social media / quotes` |
+| 04-external-views | Wikipedia、媒体报道、同行评价 | `"<人物名>" biography / criticism / review` |
+| 05-decisions | 新闻、公司公告、案例分析 | `"<人物名>" decision / strategy / case study` |
+| 06-timeline | Wikipedia、传记、生平介绍 | `"<人物名>" timeline / biography / early life` |
+
+**搜索技巧**：
+- 优先找transcript而非视频本身（有文本直接用）
+- YouTube访谈可找字幕：`yt-dlp --write-sub --skip-download <url>`
+- 英文人物用英文搜索，中文人物用中文搜索
+- 每个维度至少找2-3个来源，合并到对应的md文件
+
+**Phase 3: 质量检查**
+- 验证6个文件均存在且≥最低量
+- 检查A/B级证据占比（目标>50%）
+- 标记C/D级证据为"待验证"
+
 ## 4. 五层抽取框架
 
 ### 4.1 问题意识
