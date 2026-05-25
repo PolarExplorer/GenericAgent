@@ -350,6 +350,45 @@ def build_execution_memory_cycle_prompt(response_text, tool_calls, tool_results,
             f"Evidence Gap: {gap_text}\n"
             f"Repair Candidate: {repair_text}")
 
+
+def build_glue_gate_prompt(response_text, tool_calls, history_info=None):
+    """Advisory reminder for reuse-first design before adding generic capability."""
+    response_text = response_text or ""
+    tool_calls = tool_calls or []
+    history_info = history_info or []
+
+    recent = "\n".join(str(x) for x in history_info[-12:])
+    last_user = ""
+    for h in reversed(history_info[-20:]):
+        if isinstance(h, str) and (h.startswith('[User]') or h.startswith('[USER]')):
+            last_user = h.split(']', 1)[-1].strip()
+            break
+
+    checked_glue = 'glue_coding_gate_sop' in (recent + '\n' + response_text)
+    if not checked_glue:
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                continue
+            args = tc.get('args', {}) or {}
+            path = str(args.get('path', '')).lower()
+            if tc.get('tool_name') == 'file_read' and 'glue_coding_gate_sop' in path:
+                checked_glue = True
+                break
+    if checked_glue:
+        return ''
+
+    trigger_text = f"{last_user}\n{response_text}"
+    trigger_re = re.compile(
+        r"(?i)(新增|新建|引入|接入|封装|适配|自研|重构|架构|依赖|SDK|API|infra|infrastructure|utility|adapter|wrapper|client|auth|queue|scheduler|workflow|orchestration|from scratch)"
+    )
+    if not trigger_re.search(trigger_text):
+        return ''
+
+    return ("\n\n[Glue Gate Reminder] 当前任务可能涉及新增能力/依赖/基础设施/通用工具或工作流编排。"
+            "在写代码或定方案前，请先读取 `memory/glue_coding_gate_sop.md`，输出成熟候选、证据、胶水边界、验证与回滚；"
+            "若选择自研，需说明偏离复用路径的理由。")
+
+
 def consume_file(dr, file):
     if dr and os.path.exists(os.path.join(dr, file)): 
         with open(os.path.join(dr, file), encoding='utf-8', errors='replace') as f: content = f.read()
@@ -765,6 +804,15 @@ class GenericAgentHandler(BaseHandler):
         except Exception:
             pass
         # === END Coding Gate ===
+        # === Glue Coding Gate Reminder (advisory only) ===
+        try:
+            _gg_tc = [{'tool_name': tc['tool_name'], 'args': tc.get('args', {})} for tc in tool_calls]
+            _gg_prompt = build_glue_gate_prompt(response.content, _gg_tc, self.history_info)
+            if _gg_prompt:
+                next_prompt += _gg_prompt
+        except Exception:
+            pass
+        # === END Glue Coding Gate Reminder ===
         _c = re.sub(r'```.*?```|<thinking>.*?</thinking>', '', response.content, flags=re.DOTALL)
         rsumm = re.search(r"<summary>(.*?)</summary>", _c, re.DOTALL)
         if rsumm: summary = rsumm.group(1).strip()

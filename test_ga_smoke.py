@@ -112,3 +112,37 @@ def test_do_file_read_caps_count(tmp_path, handler_cls):
     assert "PARTIAL showing 300" in outcome.data
     assert "300|line 300" in outcome.data
     assert "301|line 301" not in outcome.data
+
+
+# ---------- GlueGate reminder regression ----------
+
+
+def test_glue_gate_prompt_triggers_for_new_infra(ga_module):
+    prompt = ga_module.build_glue_gate_prompt(
+        "I will add an auth SDK wrapper and workflow scheduler.",
+        [],
+        ["[User] 新增一个通用 auth client"],
+    )
+
+    assert "Glue Gate Reminder" in prompt
+    assert "glue_coding_gate_sop.md" in prompt
+
+
+def test_glue_gate_prompt_skips_after_sop_read(ga_module):
+    prompt = ga_module.build_glue_gate_prompt(
+        "I will add an auth SDK wrapper.",
+        [{"tool_name": "file_read", "args": {"path": "../memory/glue_coding_gate_sop.md"}}],
+        ["[User] 新增一个通用 auth client"],
+    )
+
+    assert prompt == ""
+
+
+def test_glue_gate_prompt_ignores_neutral_turn(ga_module):
+    prompt = ga_module.build_glue_gate_prompt(
+        "Summarize current status.",
+        [],
+        ["[User] 继续"],
+    )
+
+    assert prompt == ""
