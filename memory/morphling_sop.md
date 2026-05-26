@@ -3,6 +3,8 @@
 ## 定义
 Morphling 是一种项目级能力吸收/替代模式：给定任意目标项目，先抽取其目标与测例，再按组件选择调用、重写或少量复刻禁区规避，最终让自身或新产物在同一测例上达到或超过目标。
 
+> Reuse gate: before choosing 重写/self-build for any target component, run `glue_coding_gate_sop`; default to 调用/封装 mature capability unless the measured differentiator requires bounded self-build with rollback.
+
 ## 核心三元组
 1. **目标（Target）**：它解决什么问题、面向谁、核心价值是什么；目标可以是完整项目，也可以是巨型项目中的可交付子系统。
 2. **测例（Tests）**：它声称能通过的 benchmark、demo、CI、榜单、评测站、用户任务清单、性能/质量指标；没有测例先构造最小客观测例。

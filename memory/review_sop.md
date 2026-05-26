@@ -36,6 +36,8 @@
 - `review_cmd.py:install()` —— monkey-patch `GenericAgent._handle_slash_cmd`,统一接管 `/review`
 - `review_cmd.py:_render_prompt()` —— 加载 prompt 模板,注入 `{user_request}` + `{ga_root}`
 
+> Reuse gate: when a review is about a self-build decision, framework choice, or new capability path, the reviewer must ask whether `glue_coding_gate_sop` would have redirected the design toward reuse.
+
 ---
 
 ## 四、三条铁律(reviewer 顶部硬约束,不可违反)

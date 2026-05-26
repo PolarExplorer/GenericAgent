@@ -15,6 +15,8 @@
 **触发**：需要给开源项目提 PR（修 bug / 加功能 / 改文档）| **禁用**：仅读代码、不需要提交变更时
 **核心原则**：一个 PR 做一件事，测试通过才推，尊重项目规范
 
+> Reuse gate: for feature PRs or dependency/infra changes, check `glue_coding_gate_sop` before implementing; prefer the project's existing APIs, patterns, dependencies, and extension seams over introducing new self-built machinery.
+
 ## 前置准备（每个新项目首次执行）
 1. **读项目规范**（必须，不可跳过）
    ```

@@ -10,6 +10,8 @@
 - Risk: R2（修改目标页面数据，但不涉及本机文件或凭证）
 - Review: 操作后用 web_scan 确认 DOM 更新
 
+> Reuse gate: if the Vue/web UI task turns into new component infrastructure, reusable browser automation, or repeated workflow glue, check `glue_coding_gate_sop` first; prefer existing framework APIs and keep custom JS as thin adapter code.
+
 ## Workflow Phases
 1. 探测: 确认页面是 Vue3 (`__vue_app__` 存在)
 2. 定位: 找到目标 DOM 元素

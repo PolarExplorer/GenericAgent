@@ -17,6 +17,13 @@
 - 配置文件: `D:\AI\GenericAgent\mykey.py` (mixin_config含claude-main/claude-backup/gpt-5.4三节点 + native_oai_config2=right.codes gpt-5.5 + native_oai_config3=packyapi gpt-5.5备份)
 - **Images API**: right.codes/gpt/v1 端点支持gpt-image-2(非流式responses.create)，image_gen_utils.py已更新
 
+## [Context Window 配置] <!-- updated: 2026-05-24 -->
+- 机制: mykey.py各native_*_config中`context_win`(token数)→cost_tracker.py ×3=`context_window_chars`(字符数)
+- 默认: llmcore.py `context_win`默认30000→×3=90k chars；所有模型如未显式设置均受此限
+- 当前值: Claude/GPT-5.x=50000(×3=150k) | mimo-v2.5=40000(×3=120k) | kimi=35000(×3=105k) | DeepSeek=30000(×3=90k)
+- 调整: 在mykey.py对应config dict中加`'context_win': N`即可，重启GA生效
+- 瓶颈: context_win过低→历史裁剪过多→长对话丢失上下文；过高→token消耗快+API可能超时/截断
+
 ## [Codex CLI] <!-- updated: 2026-05-04 -->
 - 路径: `C:\Users\ZhuanZ（无密码）\AppData\Roaming\npm\codex`
 - Windows入口: `codex.cmd exec ...` 从文件喂prompt时用 `cmd /c "... < prompt.txt"`；PowerShell `& codex ... - < file` 会把 `<` 当非法语法
@@ -49,8 +56,8 @@
 - SOP/Skill同步: 以后凡新增或更新 `memory/*_sop.md` / `memory/*.py` 中的可用 Skill，必须同步到桌面 `GA_指令速查.md`，方便日后查阅；专家skill默认目录为 `D:\AI\GenericAgent\memory\skills\persona`
 - 类型化记忆治理: 已落地 `typed_memory_sop.md` + `typed_memory_utils.py`（分类/召回/冲突/新鲜度只读助手）+ `memory_conflict_scan.py`（重复/冲突/新鲜度/层混杂只读扫描，支持`--root`边界）
 
-## [问题修复记录] <!-- updated: 2026-05-05 -->
-- **飞书bot模型显示不生效+旧进程抢占ws** (2026-04-29): 三个根因叠加：①`if exit_reason / elif summary`的if/elif结构导致有exit_reason时summary分支被跳过，模型信息丢失 ②重启daemon后旧子进程(PID不同)仍存活抢占websocket连接，新进程收不到消息 ③pythonw stdout重定向到文件时默认全缓冲，print(flush=True)不可靠。教训: **重启长驻服务必须先tasklist查所有同名进程再全部清理，不能只靠daemon的stop机制**；改.py文件后必须清`__pycache__`或设`PYTHONDONTWRITEBYTECODE=1`防止pyc缓存；daemon启动子进程必须设`PYTHONUNBUFFERED=1`；if/elif加新分支时检查所有分支是否都需要新逻辑
+## [问题修复记录] <!-- updated: 2026-05-25 -->
+- **TUI v3 /llm 未锁定模型** (2026-05-25): `frontends/tui_v3.py` 的 `/llm` 切换只调用了 `agent.next_llm(n)`，未同步 `baseline_llm_no`，也未设置 `llm_locked`，导致下一轮任务被 `agentmain.run()` 的 pre-router 流程回归默认模型。修复: AgentBridge.switch_llm 默认同步 `baseline_llm_no` 并 `llm_locked=True`，新增 unlock_llm，`/llm auto|unlock|free` 恢复自动路由。已通过语法检查与 mock 行为验证。教训: 模型切换相关修改必须同时看两层——`ga_pre_router.py` 的自动路由规则和 `frontends/` 的用户操作入口，否则用户手动选择会被静默覆盖- **飞书bot模型显示不生效+旧进程抢占ws** (2026-04-29): 三个根因叠加：①`if exit_reason / elif summary`的if/elif结构导致有exit_reason时summary分支被跳过，模型信息丢失 ②重启daemon后旧子进程(PID不同)仍存活抢占websocket连接，新进程收不到消息 ③pythonw stdout重定向到文件时默认全缓冲，print(flush=True)不可靠。教训: **重启长驻服务必须先tasklist查所有同名进程再全部清理，不能只靠daemon的stop机制**；改.py文件后必须清`__pycache__`或设`PYTHONDONTWRITEBYTECODE=1`防止pyc缓存；daemon启动子进程必须设`PYTHONUNBUFFERED=1`；if/elif加新分支时检查所有分支是否都需要新逻辑
 - **ga_audit hot-reload命名空间分裂** (2026-04-28): `exec(src, ns)`新建ns命名空间，新函数__globals__→ns，preserved状态恢复到mod.__dict__但ns中仍是None，导致_on_turn_end读_agent_ref=None→task_id永久丢失。修复: exec后`ns.update(preserved)`再patch函数。教训: exec+setattr模式必须确保preserved同时注入ns和mod
 - **subagent产出文件写到cwd而非目标dir** (2026-04-30): 升级3 subagent将skill_solidifier.py写到temp/而非memory/，ModuleNotFoundError。教训: **subagent编码任务prompt必须显式指定输出文件绝对路径**，brain验收时先检查文件是否在正确位置再跑测试
 - **subagent验收标准必须基于真实API** (2026-04-30): 升级2首次分发时验收标准假设了错误的keychain API格式，subagent中途停下提问。教训: **分发前先file_read被改文件确认实际接口，再写验收标准**；不能凭记忆或plan描述假设API
@@ -76,6 +83,14 @@
 - 代理配置: `git config --global http.proxy http://127.0.0.1:8902` + `https.proxy`同
 - 清除: `git config --global --unset http.proxy && git config --global --unset https.proxy`
 - 验证: fetch/pull成功确认代理生效
+
+## [上游同步记录] <!-- updated: 2026-05-24 -->
+- 上游: https://github.com/lsdefine/GenericAgent (origin)
+- Fork: https://github.com/FroStorM/GenericAgent (local, PR #468已合并)
+- 最后merge: 2026-05-24 commit 6bea76c (22新提交, 上游基准a941a6d)
+- 冲突文件: agent_loop.py(plugins.hooks), llmcore.py(_ROOT路径), frontends/fsapp.py(_feishu_config+task_id guard+workspace helpers)
+- 合并策略: 本地功能保留+官方新特性整合(非覆盖)
+- 本次新增功能: TUI v3(scrollback/resize/跨终端色彩) | Agent lifecycle hooks(plugins.hooks) | keychain SecretStr掩码 | 飞书_feishu_config()重构 | _ROOT路径设置 | task_id guard
 
 ## [GA架构演进参考] <!-- updated: 2026-04-25 -->
 - 来源: "Agentic Reasoning for LLMs" (UIUC+Meta+Amazon+DeepMind+Yale, 2026, 135页综述)

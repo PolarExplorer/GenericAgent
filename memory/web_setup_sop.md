@@ -19,6 +19,8 @@
 若 web_scan 和 web_execute_js 已测试可用，无需执行此 SOP。
 仅供初始安装时，code_run 可用但 web 工具尚未配置的场景。
 
+> Reuse gate: if initialization requires new browser bridge, extension, automation adapter, or toolchain replacement, check `glue_coding_gate_sop`; prefer existing tmwebdriver/web_setup assets and keep custom glue replaceable.
+
 ### 边界条件（何时不执行）
 - 浏览器已安装但 web_scan 返回空标签页 → 不需要重装扩展，直接打开网页即可
 - 扩展已安装但 CDP 连接失败 → 检查端口冲突（见 tmwebdriver_sop），不要重复安装

@@ -208,7 +208,7 @@ if __name__ == '__main__':
     else: x_pos = 100
     time.sleep(2)
     window = webview.create_window(
-        title='GenericAgent', url=f'http://localhost:{port}',
+        title=f'GenericAgent - Port {port}', url=f'http://localhost:{port}',
         width=WINDOW_WIDTH, height=WINDOW_HEIGHT, x=x_pos, y=TOP_PADDING,
         resizable=True, text_select=True)
     webview.start()

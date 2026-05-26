@@ -13,6 +13,8 @@
 > 来源：知识底座 Stage 0→6 项目复盘
 > 适用：任何多阶段数据处理/内容生产项目
 
+> Reuse gate: before building new pipeline stages, gate scripts, or external integration glue, check `glue_coding_gate_sop`; prefer existing batch/gate/smoke utilities and define replacement/rollback seams for new adapters.
+
 ## 触发条件
 任务含 ≥3 个有依赖关系的阶段，且产物在阶段间传递。
 

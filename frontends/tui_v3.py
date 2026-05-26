@@ -1198,8 +1198,14 @@ class AgentBridge:
     def list_llms(self) -> list[tuple[int, str, bool]]:
         return self.agent.list_llms()
 
-    def switch_llm(self, n: int):
+    def switch_llm(self, n: int, *, lock: bool = True):
         self.agent.next_llm(n)
+        if lock:
+            self.agent.baseline_llm_no = self.agent.llm_no
+            self.agent.llm_locked = True
+
+    def unlock_llm(self):
+        self.agent.llm_locked = False
 
     def drain_display_queue(self, dq: queue.Queue, timeout: float = 0.25):
         """Generator: yields typed events from a display_queue."""
@@ -1531,8 +1537,10 @@ def _extract_user_text(entry) -> str:
 # Slash-command spec for the `/` hint + Tab completion (only commands _cmd
 # actually services). Built dynamically so /language switches relabel the
 # palette and /help on the next render.
+# NOTE: skill commands from memory/ are merged in so /neat, /pua etc appear
+# in the Tab palette and are passed through to the agent.
 def _cmds() -> list[tuple[str, str, str]]:
-    return [
+    builtin = [
         ('/help',     '',                       _t('cmd.help.desc')),
         ('/status',   '',                       _t('cmd.status.desc')),
         ('/llm',      _t('cmd.llm.arg'),        _t('cmd.llm.desc')),
@@ -1550,6 +1558,15 @@ def _cmds() -> list[tuple[str, str, str]]:
         ('/language', _t('cmd.language.arg'),   _t('cmd.language.desc')),
         ('/quit',     '',                       _t('cmd.quit.desc')),
     ]
+    # Merge skill-trigger commands discovered from memory/ skill files
+    try:
+        from frontends import skill_commands
+        builtin_names = {c[0] for c in builtin}
+        for cmd, arg, desc in skill_commands.discover(_ROOT, builtin_names):
+            builtin.append((cmd, arg, desc))
+    except Exception:
+        pass  # skill discovery is best-effort; never break the palette
+    return builtin
 
 
 def _heat(el: float) -> str:
@@ -3600,8 +3617,13 @@ class SB:
                     self.commit([_t('msg.review_empty')])
         elif name == 'llm':
             if arg:
-                self._bridge.switch_llm(int(arg) if arg.isdigit() else -1)
-                self.commit([_t('msg.llm_switched', name=self._bridge.llm_name)])
+                mode = arg.strip().lower()
+                if mode in ('auto', 'unlock', 'free'):
+                    self._bridge.unlock_llm()
+                    self.commit(['LLM auto routing enabled'])
+                else:
+                    self._bridge.switch_llm(int(mode) if mode.isdigit() else -1)
+                    self.commit([_t('msg.llm_switched', name=self._bridge.llm_name)])
             else:
                 items = self._bridge.list_llms()
                 if not items:
@@ -3729,7 +3751,13 @@ class SB:
                          _t('help.cz'),
                          _t('help.shift_arrow')])
         else:
-            self.commit([_t('err.unknown_cmd', name=name)])
+            # Skill-trigger fallback: pass unknown /commands (e.g. /neat, /pua)
+            # through to the agent as a regular message.  The agent's SOP/skill
+            # system knows how to handle them.
+            if name and self._bridge is not None:
+                self._submit(raw, [])
+            else:
+                self.commit([_t('err.unknown_cmd', name=name)])
 
     def _btw(self, entry: list) -> None:
         """Answer a side question and fill `entry[1]` in place.  If Esc cleared
@@ -4523,6 +4551,13 @@ class SB:
                 if self._epend or (self._rb and not self._bp):
                     with self._lk:
                         self._flush_esc()
+                    dirty = True
+                if self.buf:
+                    # Safety-net: ensure the live region repaints while the
+                    # user is typing (idle, not running).  On Windows CMD the
+                    # first invalidate() from _handle_key can be swallowed by
+                    # PTK before the renderer is fully warmed up; this 30 ms
+                    # heartbeat guarantees the input-box reflects buf content.
                     dirty = True
                 with self._sbq_lk:
                     has_q = bool(self._sbq)

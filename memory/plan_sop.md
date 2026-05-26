@@ -13,6 +13,8 @@
 
 > 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
 
+> Reuse gate: before entering plan/exploration for new capability, dependency, infrastructure, or workflow orchestration, run `glue_coding_gate_sop` to decide reuse vs self-build; only plan the self-build path after a deviation note exists.
+
 ## 🔑速查
 - **触发**：3步以上有依赖/多文件协同/条件分支/需并行；**禁用**：1-2步简单任务直接做。
 - **进入**：创建 `./plan_XXX/`，再单独调用 `handler.enter_plan_mode("./plan_XXX/plan.md")`。
