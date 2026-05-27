@@ -170,7 +170,7 @@ ask_user 确认plan后才能转入执行态。**⛔ 用户未确认不得执行�
 
 1. **读plan** — `file_read(plan.md)` 定位第一个 `[ ]` 项
 2. **读SOP** — 该步标注了SOP → 先 file_read 该SOP
-3. **检查标记** — `[D]`标记 → 必须委托subagent执行，主agent只收结果摘要；`[P]`标记 → 读 subagent_sop.md 执行Map模式；`[?]`条件 → 评估条件选分支，未选标[SKIP]
+3. **检查标记** — `[D]`标记 → 必须委托subagent执行，主agent只收结果摘要；`[P]`标记 → 读 subagent.md 执行Map模式；`[?]`条件 → 评估条件选分支，未选标[SKIP]
 4. **执行** — 无特殊标记的步骤由主agent自己执行
 5. **Mini验证** — 快速确认产出存在且合理（file_read确认非空、检查exit code等）
 6. **Reverse Sync** — 执行中发现实际情况与plan不符（前提变了/步骤不可行/发现更优路径）→ **先 file_patch 修正 plan.md 再继续执行**，禁止默默偏离。修正范围：当前步骤描述、后续步骤调整、新增/删除步骤。修正后在该步标注 `[✓ ⟲ 原因]` 表示经过逆向同步
