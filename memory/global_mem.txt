@@ -70,6 +70,14 @@
 - **file_read默认窗口治理** (2026-05-06): 为降低上下文噪声，`file_read.count` 默认从200降到120，硬上限300，并在 PARTIAL 输出提示优先 keyword 或 start+count 续读；同步更新中英文schema与smoke测试。验证: `test_ga_smoke.py`、schema JSON/default检查、LLM1审查(PASS_WITH_RISK无阻塞)、提交`8a94ecd`后短观察样本420行通过默认/续读/keyword/超大count截断，仓库干净。教训: 高频读文件工具优先用默认窗口+续读提示降噪，不继续扩大上下文压缩复杂度。
 - **中文写入策略** (2026-05-15): file_write/file_patch工具参数中的中文会被runtime截断为乱码(U+FFFD)。唯一可靠路径: file_write写含unicode escape的.py脚本→code_run exec执行，由Python解码写入目标文件。已在Bloom/Fowler/Feynman三轮验证通过。
 - **多行插入倒序策略** (2026-05-15): 对同一文件多处插入时，必须按anchor_line降序处理，否则前面的插入会导致后续行号偏移。模式: JSON定义entries(含anchor_line)→insert脚本按anchor降序排列→逐条插入。已在Fowler(12条)/Feynman(8条)验证通过。
+- **rg通配失败(glob展开)** (2026-05-26): TUI v3中执行rg --glob "*.py"等通配命令失败。根因: Windows cmd不展开glob(需rg自身处理)，但某些rg版本在Windows上glob展开行为不一致。用户看不到详细错误(TUI不显示)。建议: rg直接用固定路径或rg pattern目录/*.py(rg原生glob)，不用shell glob
+- **TUI v3日志查看** (2026-05-26): /export all可导出完整日志路径(model_responses/*.txt)。非TUI模式: python agentmain.py启动，底层print直接输出到控制台。调试SSE流中断等底层问题时建议用非TUI模式
+- **360拦截cmd/powershell弹窗** (2026-05-26): 自动化调用cmd/powershell被360拦截，无人值守时默认拒绝→任务中断。白名单方案：360安全卫士→信任区添加pythonw.exe/GA目录。用户反馈加不进去(360限制)。替代方案: schtasks任务计划以SYSTEM身份运行，绕过360用户态拦截
+- **PowerShell vs cmd语法差异** (2026-05-26): `cd /d`、`&&`、`cd D:\path` 在PowerShell中报错。PowerShell用 `;` 分隔命令、`Set-Location` 切目录、`&&`需PS7+。GA脚本应检测shell类型或默认用cmd语法
+- **TUI v3 输入法不显示** (2026-05-26): 间歇性Heisenbug，输入法候选文字不渲染。尝试renderer.reset()/renderer.clear()/_invalidate_ptk(cache=None)均未根治。PTK prompt_toolkit内部cache机制导致。用户决定等官方修复，已回滚所有hack。教训: PTK渲染层问题需深入prompt_toolkit源码，表面hack无效
+- **SSE流中断静默截断** (2026-05-26): llmcore.py L397-399流中断有内容时只print到控制台不yield给用户→TUI看不到中断回复。中转站网络波动/限流触发。官方后续版本(0908335)已加Cloudflare 520-527重试缓解
+- **上下文压缩决策** (2026-05-26): 分析官方代码后结论：context_win=30000→cap=90K chars才trim，compress_history_tags只删空消息不压缩内容，observation_compression_hook是shadow-only。官方设计有意为之，不修改。风险: 长对话旧信息堆积+纠正被淹没
+- **Windows Terminal lnk接管陷阱** (2026-05-28): `.lnk`快捷方式Target直接指定cmd.exe时，即使系统默认终端已设为WT，也不会被WT接管(走旧conhost)。`start "title" cmd /k`同理不被接管。要强制WT必须: lnk Target改为wt.exe，或bat中用`wt -w 0 new-tab cmd /k "..."`。已验证：run_agent.bat.lnk改Target→wt.exe后走WT。GA所有启动/重启bat现已统一GenericAgent env(Py3.12) + WT终端，LangChain env不再被任何GA脚本依赖。GenericAgent env已装textual 8.2.5 + prompt_toolkit 3.0.52(TUI v3依赖)。
 - **约束引擎讨论误报模式** (2026-05-20): GA讨论约束定义时，响应文本自然包含约束关键词触发REG-R020/R023误报。修复: negative_context加`讨论|约束|constraint|review|维护`等讨论上下文术语→pattern匹配但negative_context也匹配→不blocked。MISSING-PS-CAT-TYPE regex有未转义方括号致匹配静默失败。累计20条约束修复(commit 402a320+522c5e4)，dry-run 5/5通过。教训: **修改regex后必须验证编译+dry-run**；讨论约束定义的场景需在negative_context中显式豁免。
 
 ## [GitHub] <!-- updated: 2026-04-25 -->
@@ -84,13 +92,12 @@
 - 清除: `git config --global --unset http.proxy && git config --global --unset https.proxy`
 - 验证: fetch/pull成功确认代理生效
 
-## [上游同步记录] <!-- updated: 2026-05-24 -->
+## [上游同步记录] <!-- updated: 2026-05-28 -->
 - 上游: https://github.com/lsdefine/GenericAgent (origin)
-- Fork: https://github.com/FroStorM/GenericAgent (local, PR #468已合并)
-- 最后merge: 2026-05-24 commit 6bea76c (22新提交, 上游基准a941a6d)
-- 冲突文件: agent_loop.py(plugins.hooks), llmcore.py(_ROOT路径), frontends/fsapp.py(_feishu_config+task_id guard+workspace helpers)
+- Fork: https://github.com/PolarExplorer/GenericAgent (myfork)
+- 最后merge: 2026-05-28 (8bf3e5d→a3d324b, ljqCtrl冲突手动解决)
 - 合并策略: 本地功能保留+官方新特性整合(非覆盖)
-- 本次新增功能: TUI v3(scrollback/resize/跨终端色彩) | Agent lifecycle hooks(plugins.hooks) | keychain SecretStr掩码 | 飞书_feishu_config()重构 | _ROOT路径设置 | task_id guard
+- 2026-05-28合并内容: ljqCtrl Click check参数+Activate稳定切换 | ljqCtrl_sop结构头更新
 
 ## [GA架构演进参考] <!-- updated: 2026-04-25 -->
 - 来源: "Agentic Reasoning for LLMs" (UIUC+Meta+Amazon+DeepMind+Yale, 2026, 135页综述)
@@ -292,4 +299,30 @@
   - TurnstilePatch扩展导致Edge崩溃→不带扩展启动，连上后注入反检测JS
   - 残留Edge进程锁定user-data-dir→必须先`taskkill /F /IM msedge.exe`再启动
   - port 9222会与用户个人浏览器冲突→用19222
+
+## [AgentSkillsHub Skill Search] <!-- added: 2026-05-27 -->
+- 数据源: https://agentskillshub.top (Supabase PostgreSQL, 95K+条目含GitHub项目README全文)
+- 脚本: `D:\AI\GenericAgent\scripts\ga_skill_search.py`
+- 调用: `python ga_skill_search.py "keyword" [--top N] [--category CAT] [--with-readme]`
+  - 多词查询: 空格自动URL编码为%20（如 `"web scraping"`）
+  - 搜索引擎: plainto_tsquery全文搜索（search_vector=plfts.keyword），ilike在95K行上会超时
+  - 代理: 脚本内置 `--noproxy '*'` + 清除HTTP_PROXY环境变量
+  - 返回: name/url/stars/category/similarity/description，按相似度排序
+- 局限: Supabase服务器间歇性超时（非脚本问题）；数据以MCP Server为主，Python库/通用工具覆盖少
+- 使用场景: GA需要找外部工具/MCP时调用，GA读README后做智能判断（借鉴/直接用/不适用）
   - Z-Library有每日下载限制(服务端"Download limit reached"，非代码问题，约24h重置)
+
+## [GA Desktop GUI] <!-- added: 2026-05-28 -->
+- 来源: GitHub release v0.1.0 (`https://github.com/lsdefine/GenericAgent/releases/tag/v0.1.0`)
+- exe不在git源码中，只在release附件；git pull不会更新exe，需单独下载
+- 下载: 通过代理127.0.0.1:8902下载(GitHub直连超时)
+- 已下载:
+  - `frontends/GenericAgent.exe` (8.9MB, 通用版)
+  - `frontends/GenericAgent-windows-x64.exe` (8.4MB, 64位专用)
+  - 两份也已复制到桌面
+- 启动配置(首次需填):
+  - Python interpreter: `D:\soft\Anaconda\envs\GenericAgent\python.exe`
+  - GA 项目根目录: `D:\AI\GenericAgent`
+- 填错Python路径(如`C:\Users\...\Python312`)会导致Bridge超时20s
+- Tauri桌面端架构: GenericAgent.exe封装前端+调用本地Python后端
+- 两个exe可共存(便携式,不写注册表),一般用x64版即可
