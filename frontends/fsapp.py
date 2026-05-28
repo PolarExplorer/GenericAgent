@@ -1,6 +1,12 @@
 import argparse, asyncio, importlib.util, json, os, queue as Q, re, sys, threading, time, uuid
 from pathlib import Path
 
+try:
+    sys.path.insert(0, r'D:\zhishiku\scripts')
+    from training_feishu_router import handle_training_message as _training_router
+except ImportError:
+    _training_router = None
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 os.chdir(PROJECT_ROOT)
@@ -380,7 +386,7 @@ TRAINING_CHATS = _to_allowed_set(_feishu_cfg.get("fs_training_chats", []))
 
 
 def is_training_source(open_id, chat_id):
-    return bool(chat_id and chat_id in TRAINING_CHATS)
+    return bool((open_id and open_id in TRAINING_OPEN_IDS) or (chat_id and chat_id in TRAINING_CHATS))
 
 
 def get_agent():
@@ -928,9 +934,9 @@ def handle_message(data):
         return
     open_id = sender.sender_id.open_id
     chat_id = message.chat_id
-    if is_training_source(open_id, chat_id):
-        print(f"[TRAINING_SOURCE] skip open_id={open_id} chat_id={chat_id}")
-        return
+    training_source = is_training_source(open_id, chat_id)
+    if training_source:
+        print(f"[TRAINING_SOURCE] route open_id={open_id} chat_id={chat_id}")
     if chat_id and chat_id in BLOCKED_CHATS:
         print(f"[BLOCKED_CHAT] skip chat_id={chat_id}")
         return
@@ -964,6 +970,20 @@ def handle_message(data):
     print(f"收到消息 [{open_id}] (msg_id={msg_id}, create_time={create_time}, age={age_str}, {message.message_type}, {len(image_paths)} images): {user_input[:200]}")
     if message.message_type == "text" and user_input.startswith("/"):
         return handle_command(open_id, user_input, chat_id)
+
+    # Training router: intercept training messages before GA
+    if training_source and _training_router is not None:
+        try:
+            handled = _training_router(
+                user_input, image_paths,
+                send_reply=lambda msg: _send_message(open_id, msg, chat_id),
+                send_file=None,
+            )
+            if handled:
+                print(f"[TRAINING] message handled by training router: {user_input[:80]}")
+                return
+        except Exception as e:
+            print(f"[TRAINING] router error, falling through to GA: {e}")
 
     def run_agent():
         user_tasks[open_id] = {"running": True}

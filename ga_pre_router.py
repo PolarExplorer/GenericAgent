@@ -5,6 +5,7 @@ Classifies user query → task category → optimal model selection.
 Silent fallback on any error (keeps current model).
 """
 
+import os
 import re, time
 
 _last_category = None   # set by pre_route(), read by dispatch_gate for coordination
@@ -68,7 +69,7 @@ def _get_ds_config():
 def classify(raw_query, images=None, source='user', timeout=8):
     """Classify query → (category, note). Returns (None, reason) to skip routing."""
     # Skip conditions
-    if source == 'reflect':
+    if source == 'reflect' and os.environ.get('GA_REFLECT_AUTOROUTE') != '1':
         return None, 'skip:reflect'
     if images:
         return 'vision', 'has_images'

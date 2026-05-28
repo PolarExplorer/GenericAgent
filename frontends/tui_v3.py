@@ -1780,6 +1780,15 @@ def _extract_user_text(entry) -> str:
 # palette and /help on the next render.
 # NOTE: skill commands from memory/ are merged in so /neat, /pua etc appear
 # in the Tab palette and are passed through to the agent.
+def _skill_passthrough_names() -> set[str]:
+    """Skill slash commands that should be submitted to the agent."""
+    try:
+        from frontends import skill_commands
+        return {cmd.lstrip('/').lower() for cmd, _, _ in skill_commands.discover(_ROOT, set())}
+    except Exception:
+        return set()
+
+
 def _cmds() -> list[tuple[str, str, str]]:
     builtin = [
         ('/help',     '',                       _t('cmd.help.desc')),
@@ -4045,6 +4054,9 @@ class SB:
         idle_only = {'clear', 'export', 'review', 'rewind', 'continue'}
         if name in idle_only and self._running:
             self.commit([_t('err.running_blocked')]); return
+        if name in _skill_passthrough_names():
+            self._submit(raw, [])
+            return
         if name in ('q', 'quit', 'exit'):
             self._quit = True
         elif name in ('stop', 'abort'):

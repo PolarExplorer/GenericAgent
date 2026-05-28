@@ -14,7 +14,7 @@ L3: dev_map.md(GA开发导航图) | memory_cleanup_sop | typed_memory_sop+typed_
 | verify_sop | code_review_sop | debugging_sop | skill_struct_header_sop(轻量结构头模板) | project_context_sop(项目AGENTS.md上下文规范) | task_analyzer_report_sop(任务后验分析模板) | procmem_scanner | keychain | session_event_log | trace_viewer.py | skill_solidifier | ljqCtrl_sop+.py | tmwebdriver_sop | autonomous_operation_sop | scheduled_task_sop | vision_sop | adb_ui.py | mem_manager | mem_distill | mem_lifecycle
 | budget_tracker(任务分级+token累加+渐进降级+enforcement_policy) | low_token_execution_sop(低token硬规则/短输出/小窗口/短JSON) | pattern_registry(重复模式≥3次→提议固化, ga.py turn_end自动扫描)
 | research_sop(横纵分析: 时间线×竞品×交汇洞察→PDF) | writing_sop(公众号长文/HKR选题/四层自检/卡兹克风格) | md_to_pdf.py(weasyprint) | image_gen_sop+image_gen_utils.py(文生图/参考图编辑) | ui_dev_sop(mockup→编码→视觉比较迭代≥80%)
-| model_dispatch_sop(编程→GA总控+codex CLI/架构→llm_no=2 Opus/中国知识→llm_no=10 DS-V4-Pro) + ga_dispatch_gate.py(分级硬门禁 5/8/11) + ga_pre_router.py(T0预路由仅选总控模型) | tool_dispatch_sop(编码前Codex CLI硬门禁) | glue_coding_gate_sop(拼好码复用门禁: 成熟能力优先、边界设计、偏离协议、可替换/回滚) | tool_risk_sop
+| model_dispatch_sop(编程→GA总控+codex CLI/架构→llm_no=2 Opus/中国知识→llm_no=10 DS-V4-Pro) + ga_dispatch_gate.py(分级硬门禁 5/8/11) + ga_pre_router.py(T0预路由仅选总控模型; reflect默认跳过, GA_REFLECT_AUTOROUTE=1启用Goal/Hive worker自动路由) | goal_hive_sop(Goal/Hive用法+Worker模型分配) | tool_dispatch_sop(编码前Codex CLI硬门禁) | glue_coding_gate_sop(拼好码复用门禁: 成熟能力优先、边界设计、偏离协议、可替换/回滚) | tool_risk_sop
 | turnstile_bypass_sop+turnstile_utils.py(CF Turnstile绕过)
 | ui_ux_knowledge_sop(配色/风格/字体/UX准则CSV)
 | office_doc_sop(docx创建docx-js/读取pandoc/编辑XML解包 + pdf读取pdfplumber/创建reportlab/合并pypdf/OCR用mineru + xlsx openpyxl/读取pandas)

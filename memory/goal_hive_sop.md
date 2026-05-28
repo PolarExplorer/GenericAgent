@@ -45,8 +45,24 @@ BBS 第一帖必须包含以下四项：
 
 启动 master 前必须回读 `goal_state.json`，逐项确认 objective 完整、done_prompt 原文匹配，否则不得启动。
 
+## Worker 模型分配
+
+Master 派发 worker 时，**必须**根据子任务类型按 `model_dispatch_sop.md` 映射表选择 `--llm_no`：
+
+| 子任务类型 | --llm_no | 说明 |
+|-----------|----------|------|
+| OCR提取 / 数据处理 / 信息收集 | 6 | 通用执行，便宜快 |
+| 编程 / 代码修改 / 重构 | 5 (或 codex CLI) | 编程专用 |
+| 质检 / 审阅 / 决策 | 1 | Brain级模型做审核 |
+| 视觉 / 截图理解 | 4 | mimo-v2.5 |
+| 中文知识密集（公考/中医/政策） | 3 | DeepSeek Flash |
+
+不传 `--llm_no` 等于浪费钱（所有 worker 都用最贵的默认模型）或选错模型（用编程模型做OCR）。
+
 ## 拉起 worker
 
-启动 worker：`start /b python <CodeRoot>/agentmain.py --reflect <CodeRoot>/reflect/agent_team_worker.py --base_url http://127.0.0.1:<PORT> --board_key <BOARD_KEY> --name hive-worker-1`。
+启动 worker：`start /b python <CodeRoot>/agentmain.py --reflect <CodeRoot>/reflect/agent_team_worker.py --base_url http://127.0.0.1:<PORT> --board_key <BOARD_KEY> --llm_no <N> --name hive-worker-1`。
+
+其中 `<N>` 按上方「Worker 模型分配」表选择。
 
 后续 worker 由 Goal Master 按需要增加（不能超过5个，一般任务2-4个足够）。
