@@ -1026,8 +1026,7 @@ class BaseSession:
                 # instead of carrying a dangling user msg that triggers 400 loops.
                 with self.lock:
                     self._heal_history()
-                pass
-            else:
+            elif content.strip():
                 for marker in ("\n\n[!!! 流异常中断", "\n\n[!!! Response truncated:"):
                     if marker in content:
                         content = content.split(marker, 1)[0]
@@ -1482,7 +1481,7 @@ class MixinSession:
         self._cur_idx, self._switched_at = 0, 0.0
         self._model_trace = {'requested': '', 'actual': '', 'fallback_count': 0, 'chain': []}
     def __getattr__(self, name): return getattr(self._sessions[0], name)
-    _BROADCAST_ATTRS = frozenset({'system', 'tools', 'temperature', 'max_tokens', 'reasoning_effort', 'history'})
+    _BROADCAST_ATTRS = frozenset({'system', 'tools', 'temperature', 'max_tokens', 'reasoning_effort', 'history', 'stream', 'read_timeout'})
     def __setattr__(self, name, value):
         if name in self._BROADCAST_ATTRS:
             for s in self._sessions:
