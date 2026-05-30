@@ -419,7 +419,7 @@ def _mask_secret(value):
 
 
 def check_config(init_agent=False):
-    app_id, app_secret, allowed, public_access, path = _feishu_config()
+    app_id, app_secret, allowed, public_access, _cfg, path = _feishu_config()
     result = {
         "config_path": path,
         "app_id": app_id,
