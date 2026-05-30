@@ -104,6 +104,13 @@ class AgentManager:
             agentmain = importlib.import_module("agentmain")
             GA = getattr(agentmain, "GenericAgent")
             agent = GA()
+            selected_llm_no = int(self.config.get("llmNo", 0) or 0)
+            if selected_llm_no > 0 and hasattr(agent, "llmclients") and agent.llmclients:
+                selected_llm_no %= len(agent.llmclients)
+                if getattr(agent, "llm_no", None) != selected_llm_no:
+                    agent.next_llm(selected_llm_no)
+                agent.baseline_llm_no = selected_llm_no
+                agent.llm_locked = bool(self.config.get("lockModel", False))
             agent.inc_out = True
             agent.verbose = True
             threading.Thread(target=agent.run, daemon=True, name=f"GA-{sess.id}").start()

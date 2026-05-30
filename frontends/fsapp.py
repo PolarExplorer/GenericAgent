@@ -915,7 +915,12 @@ class FeishuApp(AgentChatMixin):
 def get_app():
     global app
     if app is None:
-        app = FeishuApp(get_agent(), user_tasks)
+        try:
+            app = FeishuApp(get_agent(), user_tasks)
+        except Exception as e:
+            print(f"[ERROR] GA引擎初始化失败: {e}", flush=True)
+            traceback.print_exc()
+            raise
     return app
 
 

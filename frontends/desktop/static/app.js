@@ -1649,11 +1649,12 @@ function renderModelOptions() {
   select.textContent = '';
   for (const profile of options) {
     const opt = document.createElement('option');
-    opt.value = String(profile.llmNo);
+    const llmNo = profile.llmNo ?? profile.id ?? 0;
+    opt.value = String(llmNo);
     // Display as "name/model" when both fields available
     const displayName = profile.name && profile.model
       ? `${profile.name}/${profile.model}`
-      : profile.name || profile.model || `Model ${profile.llmNo}`;
+      : profile.name || profile.model || `Model ${llmNo}`;
     opt.textContent = displayName;
     select.appendChild(opt);
   }
@@ -1704,8 +1705,14 @@ async function saveSettings() {
     const sess = state.sessions.get(state.activeId);
     if (!sess) throw new Error('No active session');
     const cfg = sess.config;
-    cfg.llmNo = Math.max(0, parseInt($('cfg-llm').value, 10) || 0);
+    const previousLlmNo = Math.max(0, parseInt(cfg.llmNo, 10) || 0);
+    const nextLlmNo = Math.max(0, parseInt($('cfg-llm').value, 10) || 0);
+    const modelChanged = nextLlmNo !== previousLlmNo;
+    cfg.llmNo = nextLlmNo;
     await window.ga.saveConfig(cfg);
+    if (modelChanged) {
+      await restartBridge({ remapSessions: true });
+    }
     closeSettings();
   } catch (err) {
     showError('Failed to save settings: ' + (err.message || err));
