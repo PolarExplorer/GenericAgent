@@ -1,6 +1,6 @@
 # [Global Memory Insight]
 浏览器特殊操作: tmwebdriver_sop(文件上传/图搜/PDF blob/物理坐标/HttpOnly Cookie/autofill突破/跨域iframe/CDP/跨tab/Slate输入) | turnstile_bypass_sop+utils(CF Turnstile验证码绕过, DrissionPage+turnstilePatch扩展, YesCaptcha备选) | zlibrary_skill(DrissionPage+Edge port19222+代理8902, Z-Library登录/搜索/下载)
-键鼠: ljqCtrl_sop(禁pyautogui/先activate) 截图/视觉: ocr_utils(rapidocr本地OCR; 公考OCR数据必须先按T014/T015清洗gate通过才可使用; 公考Layer3批处理先读civil_exam_layer3_batch_sop+项目内SOP，T041+先workflow_guard入口锁+MinerU-first分区) | vision_sop(默认mimo-v2.5多模态, 禁用mimo-v2.5-pro) | 禁全屏截图，优先窗口 | 图片生成: image_gen_sop+image_gen_utils.py(right.codes Responses API gpt-image-2, 支持文生图+参考图编辑, Codex CLI exec不暴露image_gen)
+键鼠: ljqCtrl_sop(禁pyautogui/先activate) PDF裁剪: pdf_crop_skill+pdf_crop_template.py(MinerU layout→section配对→跨页crop→span级水印遮蔽→审计HTML→JSONL写回→wiki注入, 可复用于其它公考题型) | 截图/视觉: ocr_utils(rapidocr本地OCR; 公考OCR数据必须先按T014/T015清洗gate通过才可使用; 公考Layer3批处理先读civil_exam_layer3_batch_sop+项目内SOP，T041+先workflow_guard入口锁+MinerU-first分区) | vision_sop(默认mimo-v2.5多模态, 禁用mimo-v2.5-pro) | 禁全屏截图，优先窗口 | 图片生成: image_gen_sop+image_gen_utils.py(right.codes Responses API gpt-image-2, 支持文生图+参考图编辑, Codex CLI exec不暴露image_gen)
 定时:scheduled_task_sop | 自主:autonomous_operation_sop | watchdog/反射:agentmain --reflect | Bot守护(daemon+schtasks提权):L2 | 防变砖(script_guard写入拦截+ga_watchdog外部看门狗+memory自动commit):L2 | 健康检查(script_health_check.py扫memory/*.py self_test+health_reflect.py reflect脚本, watchdog已集成)
 手机:adb_ui.py
 多Bot资源锁: ga_resource_lock.py(Windows Named Mutex, 浏览器锁+键鼠锁, 多通道自动排队)

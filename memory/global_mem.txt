@@ -211,6 +211,13 @@
 - 通用教训: **history裁剪/压缩操作后必须做三项边界校验——首条角色合法性、相邻角色不重复、末尾消息完整性**
 - 验证: 4项针对性测试PASS
 
+## [MinerU坐标系陷阱] <!-- added: 2026-05-30 -->
+- **核心陷阱**: MinerU layout.json bbox坐标是72dpi空间，但PDF渲染工具使用不同DPI（fitz自设如150dpi，pypdfium2 SCALE=2=144dpi）。直接映射MinerU坐标→渲染像素坐标会静默偏移，不报错但位置不对。
+- **20+轮教训**: 用MinerU坐标做水印遮蔽/区域裁剪时，坐标"看起来合理"但实际偏差几十~上百像素，导致遮蔽失败或裁剪偏移。
+- **可靠方案**: 放弃坐标转换，直接用OCR扫描渲染图片检测目标文字，像素级定位→遮蔽。位置无关，不受DPI/渲染器差异影响。
+- **效率优化**: 水印通常在图片底部15%，只扫描该区域即可（RapidOCR ~0.5s/图）。
+- **已集成**: `batch_crops_v2.py` 末尾已加OCR watermark masking post-process，自动扫描关键词(公考最新资料/更新进度微信/SKA674)并白化。
+
 ## [公考训练数据OCR清洗门禁] <!-- added: 2026-05-16 -->
 - 适用范围：`D:\KnowledgeFoundation\domains\civil_service_exam\` 内所有由 OCR/PDF 转出的题面、选项、答案、解析、批注、训练包数据；包括 T015 及之后批次。
 - 硬规则：OCR 只能作为 raw evidence，不能直接入库、解锁、训练或生成正式讲解；数据必须先按 T014/T015 当前清洗规则产出 cleaned/corrected 版本并通过 gate 后才能使用。
