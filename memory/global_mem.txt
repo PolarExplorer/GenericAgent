@@ -1,9 +1,12 @@
 # [Global Memory - L2]
 
-## [飞书CLI] <!-- updated: 2026-04-26 -->
-- 包: @larksuite/cli v1.0.19 (npm install -g @larksuite/cli)
+## [飞书CLI] <!-- updated: 2026-05-30 -->
+- 包: @larksuite/cli v1.0.24 (npm install -g @larksuite/cli)
 - 配置: ~/.lark-cli/config.json (App ID已配置, 密钥脱敏存储)
-- 调用: subprocess.run('lark-cli ...', shell=True) ← Windows必须shell=True才能识别.cmd
+- 中文安全调用: node run.js直接+shell=False+list args, 绕过cmd.exe GBK破坏中文参数
+- node入口: C:\Users\ZhuanZ（无密码）\AppData\Roaming\npm\node_modules\@larksuite\cli\scripts\run.js
+- 旧调用(中文损坏): subprocess.run('lark-cli ...', shell=True) ← cmd.exe GBK编码破坏中文
+- 约束: --text和--file不能同时使用; +chat-messages-list用Bot身份不能传--user-id
 - Skills: 23个lark skill已装(~/.agents/skills/lark-*), 含im/calendar/base/sheets/doc/contact/task等
 - 身份: user"三十三"已授权(--domain all全scope), Bot身份也可用
 - Shortcut命令: `lark-cli <domain> +<shortcut>` (如 `calendar +agenda`, `im +send`)

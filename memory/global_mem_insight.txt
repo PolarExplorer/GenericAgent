@@ -6,7 +6,6 @@
 多Bot资源锁: ga_resource_lock.py(Windows Named Mutex, 浏览器锁+键鼠锁, 多通道自动排队)
 脚本化CLI: scripts/(端口ga_ports/服务ga_service/API诊断ga_diag_api/history ga_history/调试ga_debug_collect/git ga_git_safe/记忆搜索ga_mem_find/任务初始化ga_task_init/OCR ga_ocr/文档ga_doc/浏览器ga_web/ADB ga_adb, 详见L2)
 文件搜索: es(~/tools/Everything/es.exe, Everything v1.4.1 portable后台服务, 索引C+D盘) 大规模文件查询直接用es, 禁PS递归/dir遍历
-
 需要时read L2 或 ls ../memory/ 查L3
 L0(META-SOP): memory_management_sop
 L2: 飞书CLI(shell=True, user+bot双身份) | API代理(mykey.py) | Codex CLI(exec不暴露image_gen) | LLM1审查入口(GeneraticAgent.next_llm(1)+llmclient.chat) | file_read默认窗口(120/上限300+续读提示) | 中文写入策略(unicode escape .py→exec, 禁直接file_write/patch中文) | 多行插入倒序策略(anchor降序避行号偏移) | 用户偏好(约束先行/反谄媚/先建议后执行/SOP-Skill同步桌面速查) | GA架构演进 | 问题修复记录 | GitHub(mykey.GITHUB_TOKEN) | Git代理(127.0.0.1:8902需梯子) | 审计Dashboard | 约束引擎(70条DSL, C031 lookback=15, R040 min_content_length=500) | 防变砖机制(script_guard+ga_watchdog+memory_autocommit) | AgentSkillsHub(skill_search.py搜95K+ MCP/GitHub项目, plfts全文搜索, 代理--noproxy, 详见L2)
@@ -25,7 +24,7 @@ L3: dev_map.md(GA开发导航图) | memory_cleanup_sop | typed_memory_sop+typed_
 | authenticated_fetch_skill(借登录态fetch) | llm_json_distill_skill(LLM蒸馏→JSON) | dual_format_render_skill(JSON→MD+HTML) | desktop_app_automation_sop(桌面GUI编排) | login_read_distill_sop(读+蒸馏+写) | multi_source_profile_sop(多源画像) | authenticated_media_download_sop(登录态媒体下载) | llm_batch_reorganize_sop(LLM批量语义重组)
 | deepresearch_sop | agentic_search_sop | github_contribution_sop | supervisor_sop | vision_api.py+.template.py | script_health_check.py+meta_check.py
 | pipeline_execution_sop+batch_runner.py+preflight_check.py+gate_runner.py+script_gate_runner.py+integration_smoke.py(多阶段流水线+脚本Gate+外部集成冒烟) | contract_sop+contract_check.py(接口契约/防覆盖) | model_switch_sop+ab_test.py(模型AB切换) | incremental_converge_sop(补缺收敛) | task_workspace_sop | session_handoff_sop(跨会话交接) | session_bot_isolation_sop | long_task_autopilot_sop+long_task_autopilot.py(长任务自动推进) | ga_brain_muscle_execution_skill(GA原生Brain-Muscle: 主GA决策审查+脚本/子代理/执行层模型执行, 不写死模型名) | crabbox_debug_workflow_skill(/crabbox|/cb: git worktree沙箱调试, L1可隔离bug, MVP N=1, bail-out 5min, 回主线再验证硬门禁)
-P1飞书训练: 大题型MVP验收记录见L2; 2026-05-08续做看桌面待办+先发“错题”实测
+P1飞书训练: 中文编码已修(node run.js绕cmd.exe); 发题实发OK; 待验回收(用户已答但未读取)
 桌面GUI: GA Desktop Tauri(GenericAgent-windows-x64.exe, GitHub release v0.1.0, exe不在git源码, 配置Python+GA根目录, 代理下载) | TUI v2 /continue选择器被输入框遮挡(已知bug, 绕过用/continue N)
 L4: L4_raw_sessions/
 规则: rules_engine.md(14条精简红线+debug/verify/review决策表, begin_reasoning必读)
