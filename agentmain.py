@@ -42,6 +42,10 @@ def get_system_prompt():
     prompt += get_global_memory()
     return prompt
 
+# SDK:
+# agent = GenericAgent(); threading.Thread(target=agent.run, daemon=True).start()
+# output1_queue = agent.put_task(prompt1)
+# output2_queue = agent.put_task(prompt2)
 class GenericAgent:
     def __init__(self):
         os.makedirs(os.path.join(script_dir, 'temp'), exist_ok=True)
@@ -49,13 +53,12 @@ class GenericAgent:
         self.task_dir = None
         self.history = []; self.handler = None; 
         self.task_queue = queue.Queue() 
-        self.is_running = False; self.stop_sig = False
-        self.llm_no = 0;  self.baseline_llm_no = 0;  self.llm_locked = False;  self.inc_out = False; self.verbose = True
-        self.show_mode = 'text'
-        # Default isolation: do not suggest reading other sessions' logs unless explicitly enabled.
-        self.peer_hint = False
+        self.is_running = False; self.stop_sig = False; self.llm_no = 0;  
+        self.inc_out = False; self.verbose = True
+        self.peer_hint = True
         self.force_non_stream = False
-        self.log_path = os.path.join(script_dir, f'temp/model_responses/model_responses_{int(time.time()*1e6)%1000000:06d}.txt')
+        logid = f'{(time.time_ns() + random.randrange(1_000_000)) % 1_000_000:06d}'
+        self.log_path = os.path.join(script_dir, f'temp/model_responses/model_responses_{logid}.txt')
         self.load_llm_sessions()
 
     def load_llm_sessions(self):
@@ -80,20 +83,13 @@ class GenericAgent:
         self.llmclients = llm_sessions
         self.llmclient = self.llmclients[self.llm_no%len(self.llmclients)]
         if oldhistory: self.llmclient.backend.history = oldhistory
-        try:
-            import ga_audit; ga_audit.install(self)
-        except Exception:
-            pass
     
     def next_llm(self, n=-1):
         self.load_llm_sessions()
         self.llm_no = ((self.llm_no + 1) if n < 0 else n) % len(self.llmclients)
         lastc = self.llmclient
         self.llmclient = self.llmclients[self.llm_no]
-        try:
-            self.llmclient.backend.history = list(lastc.backend.history)
-            if hasattr(self.llmclient.backend, 'heal'):
-                self.llmclient.backend.heal()
+        try: self.llmclient.backend.history = lastc.backend.history
         except: raise Exception('[ERROR] BAD Mixin config: Check your mykey.py')
         self.llmclient.last_tools = ''
         name = self.get_llm_name(model=True)
@@ -133,71 +129,43 @@ class GenericAgent:
             return None
         if raw_query.strip() == '/resume':
             return r'帮我看看最近有哪些会话可以恢复。读model_responses/目录，按修改时间取最近10个文件，从每个文件里找最后一个<history>...</history>块，用一句话总结每个会话在聊什么，列表给我选。注意读文件后要把字面的\n替换成真换行才能正确匹配。'
-        if raw_query.strip().startswith('/review-SDD'):
-            parts = raw_query.strip().split(None, 1)
-            working = getattr(self.handler, 'working', {}) if self.handler else {}
-            if len(parts) > 1:
-                working = dict(working); working['project_root'] = parts[1].strip()
-            if not working.get('project_root'):
-                display_queue.put({'done': '\u274c No project_root detected. Usage: /review-SDD <path_to_project>', 'source': 'system'})
-                return None
-            try:
-                from ga_review_hook import run_review
-                result = run_review(working, self)
-                display_queue.put({'done': result or '\u274c Review failed (spec.md not found or Opus unavailable)', 'source': 'system'})
-            except Exception as e:
-                display_queue.put({'done': f'\u274c Review error: {e}', 'source': 'system'})
-            return None
         return raw_query
 
     def run(self):
         while True:
             task = self.task_queue.get()
-            raw_query, source, display_queue, images = task["query"], task["source"], task["output"], task.get("images") or []
+            if isinstance(task, str): break
+            raw_query, source, display_queue = task["query"], task["source"], task["output"]
             raw_query = self._handle_slash_cmd(raw_query, display_queue)
             if raw_query is None:
                 self.task_queue.task_done(); continue
             self.is_running = True
-            self._last_activity = time.time()  # heartbeat: 任务开始
-            if len(raw_query) > 1500:
+            if len(raw_query) > 2000:
                 task_file = os.path.join(script_dir, 'temp', f'user_prompt_{int(time.time())}.md')
                 with open(task_file, 'w', encoding='utf-8') as f: f.write(raw_query)
                 raw_query = f'Long user prompt saved to {task_file}. Read and execute.'
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             
-            # Baseline regression: reset to user-chosen baseline before re-routing
-            if not self.llm_locked and self.llm_no != self.baseline_llm_no:
-                _old = f'#{self.llm_no}({self.get_llm_name(model=True)})'
-                self.next_llm(self.baseline_llm_no)
-                print(f'[PreRouter] reset {_old} → #{self.baseline_llm_no}({self.get_llm_name(model=True)})')
-
-            # T0 Pre-routing: lightweight DeepSeek classification → model switch
-            try:
-                import ga_pre_router
-                ga_pre_router.pre_route(self, raw_query, images=images, source=source)
-            except Exception as e:
-                print(f'[PreRouter] fatal: {e}')
-            
             sys_prompt = get_system_prompt() + getattr(self.llmclient.backend, 'extra_sys_prompt', '')
             if self.peer_hint: sys_prompt += f"\n[Peer] 用户提及其他会话/后台任务状态时: temp/model_responses/ (只找近期修改的文件尾部)\n"
             handler = GenericAgentHandler(self, self.history, os.path.join(script_dir, 'temp'))
+            if getattr(self, 'no_print', False): handler.print = lambda *a, **k: None
             if self.handler and 'key_info' in self.handler.working: 
                 ki = re.sub(r'\n\[SYSTEM\] 此为.*?工作记忆[。\n]*', '', self.handler.working['key_info'])  # 去旧
                 handler.working['key_info'] = ki
                 handler.working['passed_sessions'] = ps = self.handler.working.get('passed_sessions', 0) + 1
                 if ps > 0: handler.working['key_info'] += f'\n[SYSTEM] 此为 {ps} 个对话前设置的key_info，若已在新任务，先更新或清除工作记忆。\n'
             self.handler = handler  # although new handler, the **full** history is in llmclient, so it is full history!
-            self.llmclient.log_path = getattr(self, 'log_path', None)
+            self.llmclient.log_path = self.log_path
             if self.force_non_stream:
                 self.llmclient.backend.stream = False
                 self.llmclient.backend.read_timeout = max(self.llmclient.backend.read_timeout, 1200)
-            gen = agent_runner_loop(self.llmclient, sys_prompt, raw_query,
-                                    handler, TOOLS_SCHEMA, max_turns=80, verbose=self.verbose, yield_info=True)
+            gen = agent_runner_loop(self.llmclient, sys_prompt, raw_query, handler, TOOLS_SCHEMA, 
+                                    max_turns=80, verbose=self.verbose, yield_info=True)
             try:
                 full_resp = ""; last_pos = 0; curr_turn = 0; turn_resps = []
                 for chunk in gen:
-                    self._last_activity = time.time()  # heartbeat: 每次LLM返回chunk
                     if consume_file(self.task_dir, '_stop'): self.abort() 
                     if self.stop_sig: break
                     if isinstance(chunk, dict) and 'turn' in chunk: 
@@ -207,18 +175,12 @@ class GenericAgent:
                         display_queue.put({'next': full_resp[last_pos:] if self.inc_out else full_resp, 
                                            'source': source, 'turn': curr_turn, 'outputs': turn_resps[-2:]})
                         last_pos = len(full_resp)
-                if self.inc_out and last_pos < len(full_resp): display_queue.put({'next': full_resp[last_pos:], 'source': source})
-                if '</summary>' in full_resp: full_resp = full_resp.replace('</summary>', '</summary>\n\n')
-                if '</file_content>' in full_resp: full_resp = re.sub(r'<file_content>\s*(.*?)\s*</file_content>', r'\n````\n<file_content>\n\1\n</file_content>\n````', full_resp, flags=re.DOTALL)
-                # 追加模型信息
-                _backend = getattr(self.llmclient, 'backend', None)
-                _mt = getattr(_backend, 'model_trace', {})
-                _actual_model = _mt.get('actual', '') if isinstance(_mt, dict) else ''
-                if not _actual_model:
-                    _actual_model = getattr(_backend, 'name', '') or getattr(_backend, 'model', '')
-                if _actual_model:
-                    full_resp += f'\n\n🤖 {_actual_model}'
-                display_queue.put({'done': full_resp, 'source': source})
+                if self.inc_out and last_pos < len(full_resp):
+                    display_queue.put({'next': full_resp[last_pos:], 'source': source,
+                                    'turn': curr_turn, 'outputs': turn_resps[-2:]})
+                #if '</summary>' in full_resp: full_resp = full_resp.replace('</summary>', '</summary>\n\n')
+                #if '</file_content>' in full_resp: full_resp = re.sub(r'<file_content>\s*(.*?)\s*</file_content>', r'\n````\n<file_content>\n\1\n</file_content>\n````', full_resp, flags=re.DOTALL)                
+                display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn, 'outputs': turn_resps.copy()})
                 self.history = handler.history_info
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
@@ -229,7 +191,7 @@ class GenericAgent:
                 self.task_queue.task_done()
                 if self.handler is not None: self.handler.code_stop_signal.append(1)
 
-GeneraticAgent = GenericAgent    
+GeneraticAgent = GenericAgent
 
 if __name__ == '__main__':
     import argparse
@@ -241,7 +203,6 @@ if __name__ == '__main__':
     parser.add_argument('--llm_no', type=int, default=0)
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--nobg', action='store_true')
-    parser.add_argument('--once', action='store_true', help='单轮执行后立即退出，不等待reply.txt')
     args, _unknown = parser.parse_known_args()
     _reflect_args = dict(zip([k.lstrip('-') for k in _unknown[::2]], _unknown[1::2])) if _unknown else {}
 
@@ -278,7 +239,6 @@ if __name__ == '__main__':
                     with open(f'{d}/output{nround}.txt', 'w', encoding='utf-8') as f: f.write(item.get('next', ''))
             with open(f'{d}/output{nround}.txt', 'w', encoding='utf-8') as f: f.write(item['done'] + '\n\n[ROUND END]\n')
             consume_file(d, '_stop')  # 已经成功停下来了，避免打断下次reply
-            if args.once: break  # 单轮执行后立即退出
             for _ in range(300):  # 等reply.txt，10分钟超时
                 time.sleep(2)
                 if (raw := consume_file(d, 'reply.txt')): break
@@ -300,12 +260,12 @@ if __name__ == '__main__':
                     if hasattr(mod, 'init'): mod.init(_reflect_args)
                     print('[Reflect] reloaded')
                 except Exception as e: print(f'[Reflect] reload error: {e}')
-            time.sleep(getattr(mod, 'INTERVAL', 5))
             try: task = mod.check()
             except Exception as e: 
-                print(f'[Reflect] check() error: {e}'); continue
+                print(f'[Reflect] check() error: {e}'); task = None
             if task and task == '/exit': break
-            if task is None: continue
+            if not task:
+                time.sleep(getattr(mod, 'INTERVAL', 5)); continue
             print(f'[Reflect] triggered: {task[:80]}')
             dq = agent.put_task(task, source='reflect')
             try:

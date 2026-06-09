@@ -1,18 +1,5 @@
 # Vision API SOP
 
-## Struct Header
-- Trigger: 需要视觉理解屏幕/图片内容，且OCR/窗口标题无法满足时。
-- Inputs: 截图图片路径、问题/指令。
-- Outputs: 视觉分析结果文本。
-- Tools: vision_api.ask_vision, ljqCtrl(截图), ocr_utils(优先尝试)。
-- Side effects: 消耗多模态API token；截图写入临时文件。
-- Risk: R1。禁止全屏截图。
-- Failure path: 窗口不存在→不截图；OCR够用→不调vision。
-- Review: 无需特殊审查。
-
-
-> 模型选择看 `model_dispatch_sop`；工具/编程器选择看 `tool_dispatch_sop`
-
 ## ⚠️ 前置规则（必须遵守）
 
 1. **先枚举窗口**：调用 vision 前必须先用 `pygetwindow` 枚举窗口标题，确认目标窗口存在且已激活到前台。窗口不存在就不要截图。
@@ -23,23 +10,14 @@
 
 ```python
 from vision_api import ask_vision
-
-result = ask_vision(image, prompt="描述图片内容", backend='minimax')
+result = ask_vision(image, prompt="描述图片内容", timeout=60, max_pixels=1_440_000)
 # image: 文件路径(str/Path) 或 PIL Image
-# backend: 'minimax'(默认, mimo-v2.5) | 'openai'(gpt-5.4) | 'modelscope'
+# backend: 'claude'(默认) | 'openai' | 'modelscope'
 # 返回 str：成功为模型回复，失败为 'Error: ...'
 ```
 
-## 后端与模型
+## 如果没有 `vision_api.py`，初次构建vision能力
 
-| backend | 模型 | 用途 | Token消耗 |
-|---------|------|------|-----------|
-| `minimax`（默认） | mimo-v2.5 | 图片理解，中文友好 | 1x |
-| `openai` | gpt-5.4 | 备用，英文场景 | — |
-
-> ⚠️ `mimo-v2.5-pro` **不支持**图片输入（纯文本模型），勿使用。
-> `mimo-v2-omni` 也支持多模态，需时可在 mykey.py 中切换。
-
-## 已构建完成
-
-`memory/vision_api.py` 已存在且测试通过（2026-04-24）。
+1. 复制 `memory/vision_api.template.py` → `memory/vision_api.py`
+2. 只改头部"用户配置区"：去 `mykey.py` 里扫描变量名（⚠️ 只看名字，禁止输出 apikey 值），尝试找能用配置名填入 `CLAUDE_CONFIG_KEY` / `OPENAI_CONFIG_KEY`，`DEFAULT_BACKEND` 选后端，并测试
+3. 保底：没有可用 config 时去 `https://modelscope.cn/my/myaccesstoken` 申请 token 填入 `MODELSCOPE_API_KEY`

@@ -1,4 +1,6 @@
 # adb_ui.py - 一键dump+解析Android UI (u2优先，原生fallback)
+# 要先看 computer_use.md；dump配合ui_detect，微信/支付宝小程序常需detect补盲
+# 搜索框一般直接输入拼音/首字母即可，别硬啃 adb 中文输入
 # u2 (uiautomator2) 不受idle限制，适合动画密集app（美团等）
 # 弹窗检测: ui(clickable_only=True, raw=True) 找全屏FrameLayout+底部小ImageView(关闭X)
 # 已知包名: 美团外卖=com.sankuai.meituan.takeoutnew 淘宝=com.taobao.taobao
@@ -79,30 +81,6 @@ def ui(keyword=None, clickable_only=False, raw=False):
 def tap(x, y):
     subprocess.run([ADB, "shell", "input", "tap", str(x), str(y)], capture_output=True)
     print(f"tap({x},{y}) ok")
-
-
-def self_test():
-    """Offline smoke test: XML parsing only; never calls adb/uiautomator or taps."""
-    xml = '''<hierarchy>
-      <node package="com.example" text="Login" content-desc="" clickable="true" class="android.widget.Button" resource-id="com.example:id/login" bounds="[10,20][110,60]" />
-      <node package="com.example" text="" content-desc="Username" clickable="false" class="android.widget.EditText" resource-id="com.example:id/user" bounds="[0,0][50,20]" />
-      <node package="com.termux" text="Ignore" clickable="true" class="android.widget.Button" bounds="[0,0][1,1]" />
-      <node package="com.example" text="" content-desc="" clickable="false" class="android.view.View" bounds="[0,0][1,1]" />
-    </hierarchy>'''
-
-    nodes = _parse_xml(xml, raw=False)
-    assert len(nodes) == 2
-    assert nodes[0]["text"] == "Login"
-    assert nodes[0]["click"] is True
-    assert (nodes[0]["cx"], nodes[0]["cy"]) == (60, 40)
-    assert nodes[1]["text"] == "Username"
-    assert nodes[1]["edit"] is True
-
-    clickable = _parse_xml(xml, clickable_only=True, raw=True)
-    assert len(clickable) == 1 and clickable[0]["text"] == "Login"
-    filtered = _parse_xml(xml, keyword="user", raw=True)
-    assert len(filtered) == 1 and filtered[0]["text"] == "Username"
-    return True
 
 if __name__ == "__main__":
     ui()

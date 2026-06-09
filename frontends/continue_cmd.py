@@ -1,26 +1,7 @@
 """`/continue` command: list & restore past model_responses sessions.
 Pure functions + one `install(cls)` monkey-patch entry. No side effects at import.
 """
-import ast, glob, json, os, re, time, threading
-
-# --- Session list snapshot cache (per-caller key) ---
-# Prevents /continue N from re-sorting and picking a different session than shown.
-_session_cache_lock = threading.Lock()
-_session_cache = {}  # key -> (timestamp, sessions_list)
-_SESSION_CACHE_TTL = 300  # 5 minutes
-
-
-def _cache_sessions(key, sessions):
-    with _session_cache_lock:
-        _session_cache[key] = (time.time(), list(sessions))
-
-
-def _get_cached_sessions(key):
-    with _session_cache_lock:
-        entry = _session_cache.get(key)
-        if entry and (time.time() - entry[0]) < _SESSION_CACHE_TTL:
-            return list(entry[1])  # return a copy to prevent mutation
-    return None
+import ast, glob, json, os, re, time
 _LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         'temp', 'model_responses')
 _LOG_GLOB = os.path.join(_LOG_DIR, 'model_responses_*.txt')
@@ -62,6 +43,20 @@ def _first_user(pairs):
         for line in p.splitlines():
             s = line.strip()
             if s and not s.startswith('###'): return s
+    return ''
+
+
+def _last_user(text):
+    """Last real user prompt. Scans `=== Prompt ===` blocks directly (no
+    Prompt/Response pairing, so response-less/aborted sessions still preview),
+    newest-first, returning the first one `_user_text` accepts (it drops
+    tool_result continuations + all _INJECT_MARKERS). Better preview anchor than
+    the first prompt — reflects what the session was most recently about."""
+    for label, body in reversed(_BLOCK_RE.findall(text or '')):
+        if label == 'Prompt':
+            t = _user_text(body)
+            if t:
+                return t
     return ''
 
 
@@ -192,12 +187,20 @@ def _preview_from_file(path):
                 fh.seek(-_PREVIEW_WIN, 2); tail = fh.read()
     except OSError: return ''
     tail_s = tail.decode('utf-8', errors='replace')
-    m = _SUMMARY_RE.findall(tail_s)
-    if m: return m[-1].strip()
-    for line in head.decode('utf-8', errors='replace').splitlines():
-        s = line.strip()
-        if s and not s.startswith('===') and not s.startswith('###') and '<history>' not in s:
+    # Use only the latest <summary>, and reject it if dirty. Models sometimes emit
+    # an unclosed <summary>, so the non-greedy DOTALL match pairs it with a far-away
+    # </summary> and swallows === block headers / JSON across rounds. Treat such a
+    # match as invalid and fall through to the last user prompt (don't dig older ones).
+    cands = _SUMMARY_RE.findall(tail_s)
+    if cands:
+        s = ' '.join(cands[-1].split())
+        if s and '=== ' not in s and '"role"' not in s and len(s) <= 200:
             return s
+    # Summary invalid/absent -> last real user prompt (JSON-aware, skips anchors;
+    # scans Prompt blocks directly so response-less sessions still preview).
+    lu = _last_user(tail_s) or _last_user(head.decode('utf-8', errors='replace'))
+    if lu:
+        return ' '.join(lu.split())[:120]
     return ''
 
 
@@ -381,13 +384,11 @@ def reset_conversation(agent, message='🆕 已开启新对话，当前上下文
             client.last_tools = ''
     if hasattr(agent, 'handler'):
         agent.handler = None
-    if hasattr(agent, 'llm_locked'):
-        agent.llm_locked = False
     return message
 
 def format_list(sessions, limit=20):
     if not sessions: return '❌ 没有可恢复的历史会话'
-    lines = ['**可手动跨会话恢复**（隔离默认开启；只有输入 `/continue N` 才会恢复第 N 个历史会话）：', '']
+    lines = ['**可恢复会话**（输入 `/continue N` 恢复第 N 个）：', '']
     for i, (_, mtime, first, n) in enumerate(sessions[:limit], 1):
         preview = _escape_md((first or '（无法预览）').replace('\n', ' ')[:60])
         lines.append(f'{i}. `{_rel_time(mtime)}` · **{n} 轮** · {preview}')
@@ -416,29 +417,20 @@ def restore(agent, path):
     return f'⚠️ 非 native 格式，已降级恢复 {n} 轮摘要（{name}）\n(请输入新问题继续)', False
 
 def handle(agent, query, display_queue):
-    """Dispatch /continue or /continue N. Returns None if consumed else original query.
-
-    Improvements (2026-05-11): snapshot cache + PID/filename resolve.
-    """
+    """Dispatch /continue or /continue N. Returns None if consumed else original query."""
     s = (query or '').strip()
-    cache_key = f'handle_{os.getpid()}'
-
     if s == '/continue':
-        sessions = list_sessions(exclude_pid=os.getpid())
-        _cache_sessions(cache_key, sessions)
-        display_queue.put({'done': format_list(sessions), 'source': 'system'})
+        display_queue.put({'done': format_list(list_sessions(exclude_pid=os.getpid())), 'source': 'system'})
         return None
-
-    m = re.match(r'/continue\s+(\S+)\s*$', s)
+    m = re.match(r'/continue\s+(\d+)\s*$', s)
     if m:
-        arg = m.group(1)
-        sessions = _get_cached_sessions(cache_key) or list_sessions(exclude_pid=os.getpid())
-        path, err = _resolve_session_arg(arg, sessions)
-        if err:
-            display_queue.put({'done': err, 'source': 'system'})
+        sessions = list_sessions(exclude_pid=os.getpid())
+        idx = int(m.group(1)) - 1
+        if not (0 <= idx < len(sessions)):
+            display_queue.put({'done': f'❌ 索引越界（有效范围 1-{len(sessions)}）', 'source': 'system'})
             return None
         reset_conversation(agent, message=None)
-        msg, _ = restore(agent, path)
+        msg, _ = restore(agent, sessions[idx][0])
         display_queue.put({'done': msg, 'source': 'system'})
         return None
     return query
@@ -583,68 +575,21 @@ def extract_ui_messages(path):
     return [m for m in out if (m.get('content') or '').strip()]
 
 
-def _resolve_session_arg(arg, sessions):
-    """Resolve a /continue argument to a session path.
-
-    Supports:
-      - Numeric index: "2" → sessions[1]
-      - PID fragment:  "63992" → first session whose filename contains '63992'
-      - Filename:      "model_responses_63992.txt" → exact match
-
-    Returns (path, error_msg). Exactly one is non-None.
-    """
-    # 1) Pure small index (1-based, ≤ len)
-    if arg.isdigit():
-        idx = int(arg) - 1
-        if 0 <= idx < len(sessions):
-            return sessions[idx][0], None
-        # Maybe it's a PID that also looks like a number — fall through to fuzzy match
-        # but only if > len (to avoid ambiguity with real indices)
-        if int(arg) <= len(sessions):
-            return None, f'❌ 索引越界（有效范围 1-{len(sessions)}）'
-        # Treat as PID fragment
-        for path, *_ in sessions:
-            if arg in os.path.basename(path):
-                return path, None
-        return None, f'❌ 未找到包含 "{arg}" 的会话文件'
-
-    # 2) Filename or fragment
-    for path, *_ in sessions:
-        if arg == os.path.basename(path) or arg in os.path.basename(path):
-            return path, None
-    return None, f'❌ 未找到匹配 "{arg}" 的会话文件'
-
-
 def handle_frontend_command(agent, query, exclude_pid=None):
-    """Frontend-friendly /continue entry that returns text directly.
-
-    Improvements (2026-05-11):
-    - /continue caches the session list; /continue N uses the cached snapshot
-    - Supports /continue <PID> and /continue <filename> for stable addressing
-    """
+    """Frontend-friendly /continue entry that returns text directly."""
     s = (query or '').strip()
     exclude_pid = os.getpid() if exclude_pid is None else exclude_pid
-    cache_key = f'frontend_{exclude_pid}'
-
     if s == '/continue':
-        sessions = list_sessions(exclude_pid=exclude_pid)
-        _cache_sessions(cache_key, sessions)
-        return format_list(sessions)
-
-    m = re.match(r'/continue\s+(\S+)\s*$', s)
+        return format_list(list_sessions(exclude_pid=exclude_pid))
+    m = re.match(r'/continue\s+(\d+)\s*$', s)
     if not m:
-        return '用法: /continue 或 /continue <序号|PID|文件名>'
-
-    arg = m.group(1)
-    # Use cached snapshot if available; otherwise fresh list
-    sessions = _get_cached_sessions(cache_key) or list_sessions(exclude_pid=exclude_pid)
-    path, err = _resolve_session_arg(arg, sessions)
-    if err:
-        return err
-
-    name = os.path.basename(path)
+        return '用法: /continue 或 /continue N'
+    sessions = list_sessions(exclude_pid=exclude_pid)
+    idx = int(m.group(1)) - 1
+    if not (0 <= idx < len(sessions)):
+        return f'❌ 索引越界（有效范围 1-{len(sessions)}）'
     reset_conversation(agent, message=None)
-    msg, _ = restore(agent, path)
+    msg, _ = restore(agent, sessions[idx][0])
     return msg
 
 

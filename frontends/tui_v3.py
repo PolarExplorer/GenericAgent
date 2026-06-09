@@ -1077,6 +1077,9 @@ def _grab_clipboard_file() -> tuple[str, bool] | None:
 def _cleanup():
     if os.path.isdir(_TEMP_DIR):
         shutil.rmtree(_TEMP_DIR, ignore_errors=True)
+    # Drop this run's signal dir if it never accumulated an in-flight file.
+    try: _rmdir_if_empty(os.path.join(_ROOT, 'temp', f'_tui_v3_{os.getpid()}'))
+    except Exception: pass
 
 atexit.register(_cleanup)
 
@@ -1333,12 +1336,13 @@ class AgentBridge:
             self.agent.llmclient = self.agent.llmclients[llm_no % len(self.agent.llmclients)]
         self.agent.inc_out = True
         self.agent.verbose = True
-        # task_dir enables ga's `_stop` / `_keyinfo` / `_intervene` consume
-        # paths.  PID-scoped dir so concurrent v3 processes don't share
-        # signal files.
+        # task_dir path enables ga's `_keyinfo` / `_intervene` consume paths.
+        # PID-scoped so concurrent v3 processes don't share signal files.
+        # Only the *path* is set here; the dir is created lazily by the writer
+        # (`inject_intervene`) when a signal is actually injected.  Eager
+        # makedirs left a stale empty `temp/_tui_v3_<pid>` behind for every
+        # run that never used intervene; `consume_file` tolerates a missing dir.
         self.agent.task_dir = os.path.join(_ROOT, 'temp', f'_tui_v3_{os.getpid()}')
-        try: os.makedirs(self.agent.task_dir, exist_ok=True)
-        except Exception: pass
         self.ask_user_queue: queue.Queue[AskUserEvent] = queue.Queue()
         # Wrapped user messages we appended to `_intervene` since the last
         # turn boundary.  At a non-exit boundary the file was consumed and
@@ -1450,14 +1454,8 @@ class AgentBridge:
     def list_llms(self) -> list[tuple[int, str, bool]]:
         return self.agent.list_llms()
 
-    def switch_llm(self, n: int, *, lock: bool = True):
+    def switch_llm(self, n: int):
         self.agent.next_llm(n)
-        if lock:
-            self.agent.baseline_llm_no = self.agent.llm_no
-            self.agent.llm_locked = True
-
-    def unlock_llm(self):
-        self.agent.llm_locked = False
 
     def drain_display_queue(self, dq: queue.Queue, timeout: float = 0.25):
         """Generator: yields typed events from a display_queue."""
@@ -1823,19 +1821,8 @@ def _extract_user_text(entry) -> str:
 # Slash-command spec for the `/` hint + Tab completion (only commands _cmd
 # actually services). Built dynamically so /language switches relabel the
 # palette and /help on the next render.
-# NOTE: skill commands from memory/ are merged in so /neat, /pua etc appear
-# in the Tab palette and are passed through to the agent.
-def _skill_passthrough_names() -> set[str]:
-    """Skill slash commands that should be submitted to the agent."""
-    try:
-        from frontends import skill_commands
-        return {cmd.lstrip('/').lower() for cmd, _, _ in skill_commands.discover(_ROOT, set())}
-    except Exception:
-        return set()
-
-
 def _cmds() -> list[tuple[str, str, str]]:
-    builtin = [
+    return [
         ('/help',     '',                       _t('cmd.help.desc')),
         ('/status',   '',                       _t('cmd.status.desc')),
         ('/llm',      _t('cmd.llm.arg'),        _t('cmd.llm.desc')),
@@ -1866,15 +1853,6 @@ def _cmds() -> list[tuple[str, str, str]]:
         ('/resume',   '',                       _t('cmd.resume.desc')),
         ('/quit',     '',                       _t('cmd.quit.desc')),
     ]
-    # Merge skill-trigger commands discovered from memory/ skill files
-    try:
-        from frontends import skill_commands
-        builtin_names = {c[0] for c in builtin}
-        for cmd, arg, desc in skill_commands.discover(_ROOT, builtin_names):
-            builtin.append((cmd, arg, desc))
-    except Exception:
-        pass  # skill discovery is best-effort; never break the palette
-    return builtin
 
 
 def _heat(el: float) -> str:
@@ -1960,6 +1938,25 @@ _BP_START = b'\x1b[200~'
 _BP_END = b'\x1b[201~'
 _SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 _ROOT = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _rmdir_if_empty(path: str | None) -> None:
+    """Best-effort remove a signal task_dir once empty.  `os.rmdir` only
+    succeeds on an empty dir, so a still-pending `_intervene` is never lost."""
+    if not path:
+        return
+    try: os.rmdir(path)
+    except OSError: pass
+
+
+def _sweep_stale_task_dirs() -> None:
+    """Delete empty `temp/_tui_v3_*` signal dirs left by prior runs (incl.
+    crashes).  Empty == no pending signal; a live instance re-creates lazily
+    on its next inject."""
+    import glob as _glob
+    for d in _glob.glob(os.path.join(_ROOT, 'temp', '_tui_v3_*')):
+        if os.path.isdir(d):
+            _rmdir_if_empty(d)
 
 
 # ── terminal window title (OSC 0) ────────────────────────────────────────
@@ -4000,12 +3997,20 @@ class SB:
             self._run_shell(raw[1:].strip())
             return
         if raw.startswith('/'):
+            # Expand pasted/file/image placeholders BEFORE dispatch so a command
+            # carries the real pasted text, not a `[Pasted text #N]` marker — e.g.
+            # `/morphling <pasted multi-line target>`. Without this the command
+            # path returned here before the expansion below ever ran, so the agent
+            # got the literal placeholder. `self.hist` already kept the raw input.
+            expanded = self._expand(raw)
             # /btw owns its own live-region panel — keep the command itself
             # out of the main scrollback.
-            cmd0 = (raw[1:].split(None, 1)[0] or '').lower()
+            cmd0 = (expanded[1:].split(None, 1)[0] or '').lower()
             if cmd0 != 'btw':
-                self._commit_user(raw)
-            self._cmd(raw); return
+                self._commit_user(expanded)
+            self._cmd(expanded)
+            self._pstore.clear(); self._fstore.clear(); self._imgs.clear()
+            return
         # Expand placeholders FIRST so the agent receives the resolved text,
         # not the [Image #N] / [Pasted #N] markers.  This matches the idle
         # submit path below — keeping the form identical means a queued
@@ -4079,9 +4084,6 @@ class SB:
         idle_only = {'clear', 'export', 'review', 'rewind', 'continue'}
         if name in idle_only and self._running:
             self.commit([_t('err.running_blocked')]); return
-        if name in _skill_passthrough_names():
-            self._submit(raw, [])
-            return
         if name in ('q', 'quit', 'exit'):
             self._quit = True
         elif name in ('stop', 'abort'):
@@ -4410,13 +4412,8 @@ class SB:
                 _open_picker()
         elif name == 'llm':
             if arg:
-                mode = arg.strip().lower()
-                if mode in ('auto', 'unlock', 'free'):
-                    self._bridge.unlock_llm()
-                    self.commit(['LLM auto routing enabled'])
-                else:
-                    self._bridge.switch_llm(int(mode) if mode.isdigit() else -1)
-                    self.commit([_t('msg.llm_switched', name=self._bridge.llm_name)])
+                self._bridge.switch_llm(int(arg) if arg.isdigit() else -1)
+                self.commit([_t('msg.llm_switched', name=self._bridge.llm_name)])
             else:
                 items = self._bridge.list_llms()
                 if not items:
@@ -4555,13 +4552,7 @@ class SB:
                          _t('help.cz'),
                          _t('help.shift_arrow')])
         else:
-            # Skill-trigger fallback: pass unknown /commands (e.g. /neat, /pua)
-            # through to the agent as a regular message.  The agent's SOP/skill
-            # system knows how to handle them.
-            if name and self._bridge is not None:
-                self._submit(raw, [])
-            else:
-                self.commit([_t('err.unknown_cmd', name=name)])
+            self.commit([_t('err.unknown_cmd', name=name)])
 
     def _btw(self, entry: list) -> None:
         """Answer a side question and fill `entry[1]` in place.  If Esc cleared
@@ -5512,13 +5503,6 @@ class SB:
                     with self._lk:
                         self._flush_esc()
                     dirty = True
-                if self.buf:
-                    # Safety-net: ensure the live region repaints while the
-                    # user is typing (idle, not running).  On Windows CMD the
-                    # first invalidate() from _handle_key can be swallowed by
-                    # PTK before the renderer is fully warmed up; this 30 ms
-                    # heartbeat guarantees the input-box reflects buf content.
-                    dirty = True
                 with self._sbq_lk:
                     has_q = bool(self._sbq)
                 if (has_q or self._pending_repaint) and self._ptk_app is not None:
@@ -5604,6 +5588,7 @@ def main(argv: list[str] | None = None) -> int:
     if not sys.stdin.isatty():
         print(_t('err.no_tty'))
         return 1
+    _sweep_stale_task_dirs()  # clear empty signal dirs left by prior runs
     SB().run()
     return 0
 

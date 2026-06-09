@@ -2,7 +2,6 @@ import os, json, re, time, requests, sys, threading, urllib3, base64, importlib,
 from datetime import datetime
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4())
-_SESSION_LOG_ID = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 if _ROOT not in sys.path: sys.path.append(_ROOT)
 
@@ -18,7 +17,9 @@ def _load_mykeys():
         raise Exception(f'[ERROR] mykey.py has syntax error: {e}') from e
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mykey.json')
     if not os.path.exists(p): raise Exception('[ERROR] mykey.py not found in sys.path and mykey.json not found. Run "python configure_mykey.py" or copy mykey_template.py to mykey.py and fill in your keys.')
-    with open(_mykey_path := p, encoding='utf-8') as f: return json.load(f)
+    with open(_mykey_path := p, encoding='utf-8') as f: mk = json.load(f)
+    if isinstance(mk, dict) and 'remote_url' in mk: return requests.get(mk['remote_url'], timeout=10).json()
+    return mk
 
 _mykey_path = _mykey_mtime = None
 def reload_mykeys():
@@ -93,188 +94,6 @@ def safeprint(*argv):
     except OSError: pass
 print = safeprint
 
-def _message_text_for_digest(msg, max_len=900):
-    """Extract compact plain text from a history message without preserving tool links."""
-    parts = []
-    content = msg.get('content', '')
-    if isinstance(content, str): parts.append(content)
-    elif isinstance(content, list):
-        for b in content:
-            if not isinstance(b, dict): continue
-            t = b.get('type')
-            if t == 'text': parts.append(b.get('text', ''))
-            elif t == 'tool_use':
-                name = b.get('name') or b.get('input', {}).get('name') or 'tool'
-                inp = b.get('input', {})
-                inp_s = json.dumps(inp, ensure_ascii=False)
-                if len(inp_s) > max_len:
-                    # Extract top-level keys + truncated preview instead of raw JSON cut
-                    keys = list(inp.keys())[:10] if isinstance(inp, dict) else []
-                    inp_s = f"keys={keys} " + inp_s[:max_len // 2] + '…'
-                parts.append(f"[tool_use:{name}] {inp_s}")
-            elif t == 'tool_result':
-                c = b.get('content', '')
-                if isinstance(c, list): c = '\n'.join(x.get('text', '') for x in c if isinstance(x, dict))
-                parts.append(f"[tool_result] {c}")
-    text = '\n'.join(str(p) for p in parts if p)
-    text = re.sub(r'<(thinking|think)>[\s\S]*?</\1>', '<thinking>[...]</thinking>', text)
-    text = re.sub(r'<(history|key_info)>[\s\S]*?</\1>', lambda m: f'<{m.group(1)}>[...]</{m.group(1)}>', text)
-    text = re.sub(r'\n{3,}', '\n\n', text).strip()
-    # Strip [ENGINE] constraint violation injections to prevent cross-task pollution in digest
-    text = re.sub(r'\[ENGINE\]\s*约束引擎检测到[\s\S]*', '', text).strip()
-    return text[:max_len//2] + '\n...[Truncated]...\n' + text[-max_len//2:] if len(text) > max_len else text
-
-
-def _compact_history_prefix(history, target, keep_recent=8):
-    """Replace old history prefix with one plain-text digest while keeping recent raw turns."""
-    if len(history) <= keep_recent + 2: return False
-    split = max(1, len(history) - keep_recent)
-    while split < len(history) and history[split].get('role') != 'user': split += 1
-    if split >= len(history) - 1: return False
-    old, recent = history[:split], history[split:]
-    budget = max(1200, min(24000, int(target * 0.20)))
-    # Graduated allocation: later messages (closer to recent context) get 2x weight
-    n = max(1, len(old))
-    half = n // 2
-    # first half gets weight 1, second half gets weight 2 → total_weight = half + 2*(n-half)
-    total_weight = half + 2 * (n - half)
-    base_per = max(120, budget // max(1, total_weight))
-    # per_msg_list[i]: chars budget for message i
-    per_msg_list = [base_per if i < half else base_per * 2 for i in range(n)]
-    lines = ["[GA_CONTEXT_DIGEST] Older conversation was compacted to reduce repeated input tokens. Preserve these facts, decisions, constraints, and evidence references; recent raw messages follow."]
-    # Pre-merge tool_use + tool_result pairs for coherent digest
-    merged_old = []
-    merged_budgets = []  # parallel budget list for merged_old
-    i = 0
-    while i < len(old):
-        msg = old[i]
-        # Detect assistant with tool_use followed by user with tool_result
-        if (msg.get('role') == 'assistant' and i + 1 < len(old)
-                and old[i + 1].get('role') == 'user'):
-            blocks = msg.get('content', [])
-            next_blocks = old[i + 1].get('content', [])
-            if isinstance(blocks, list) and isinstance(next_blocks, list):
-                tool_uses = [b for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use']
-                tool_results = [b for b in next_blocks if isinstance(b, dict) and b.get('type') == 'tool_result']
-                if tool_uses and tool_results:
-                    # Merged pair gets combined budget of both messages
-                    pair_budget = per_msg_list[i] + (per_msg_list[i + 1] if i + 1 < n else 0)
-                    # Build merged summary: [tool:name → result_snippet]
-                    result_map = {b.get('tool_use_id'): b for b in tool_results}
-                    parts = []
-                    # Include any non-tool text from assistant
-                    for b in blocks:
-                        if isinstance(b, dict) and b.get('type') == 'text' and b.get('text', '').strip():
-                            parts.append(b['text'].strip())
-                    for tu in tool_uses:
-                        name = tu.get('name', 'tool')
-                        tr = result_map.get(tu.get('id'))
-                        res_snip = ''
-                        if tr:
-                            rc = tr.get('content', '')
-                            if isinstance(rc, list):
-                                rc = ' '.join(b.get('text', '') for b in rc if isinstance(b, dict))
-                            res_snip = str(rc)[:pair_budget // 2]
-                        inp = tu.get('input', {})
-                        inp_keys = list(inp.keys())[:6] if isinstance(inp, dict) else []
-                        parts.append(f"[tool:{name}({inp_keys})→{res_snip}]")
-                    # Include any non-tool text from user (tool_result msg)
-                    for b in next_blocks:
-                        if isinstance(b, dict) and b.get('type') == 'text' and b.get('text', '').strip():
-                            parts.append(b['text'].strip())
-                    merged_old.append({'role': 'assistant', '_merged_text': '\n'.join(parts)})
-                    merged_budgets.append(pair_budget)
-                    i += 2
-                    continue
-        merged_old.append(msg)
-        merged_budgets.append(per_msg_list[i] if i < n else base_per)
-        i += 1
-    for idx, msg in enumerate(merged_old):
-        msg_budget = merged_budgets[idx] if idx < len(merged_budgets) else base_per
-        if '_merged_text' in msg:
-            text = msg['_merged_text'][:msg_budget]
-        else:
-            text = _message_text_for_digest(msg, msg_budget)
-        if text: lines.append(f"{idx}. {msg.get('role','?')}: {text}")
-    digest = '\n'.join(lines)
-    compacted = {"role": "user", "content": [{"type": "text", "text": digest}]}
-    before = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
-    history[:] = [compacted] + recent
-    # Merge consecutive user messages after compaction (digest is user, recent[0] may also be user)
-    if len(history) >= 2 and history[0].get('role') == 'user' and history[1].get('role') == 'user':
-        second = history[1]
-        sc = second.get('content', [])
-        extra_text = ''
-        if isinstance(sc, str): extra_text = sc
-        elif isinstance(sc, list):
-            extra_text = '\n'.join(b.get('text', '') for b in sc if isinstance(b, dict) and b.get('type') == 'text')
-        if extra_text.strip():
-            history[0]['content'][0]['text'] += '\n---\n' + extra_text.strip()
-        history.pop(1)
-    after = sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
-    print(f'[Debug] Compacted history prefix: {before} -> {after} chars, {len(old)} msgs -> digest.')
-    return after < before
-
-
-def _cleanup_history_tool_boundaries(history):
-    # Post-trim orphan cleanup: remove orphaned assistant(tool_use) at boundary
-    if history:
-        i = 0
-        while i < len(history) - 1:
-            m = history[i]
-            if m.get('role') == 'assistant':
-                content = m.get('content', [])
-                has_tool_use = any(isinstance(b, dict) and b.get('type') == 'tool_use' for b in content) if isinstance(content, list) else False
-                if has_tool_use:
-                    # Check if next message has matching tool_results
-                    nxt = history[i + 1]
-                    if nxt.get('role') != 'user':
-                        history.pop(i); continue
-                    nxt_content = nxt.get('content', [])
-                    if isinstance(nxt_content, list):
-                        result_ids = {b.get('tool_use_id') for b in nxt_content if isinstance(b, dict) and b.get('type') == 'tool_result'}
-                        use_ids = {b.get('id') for b in content if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('id')}
-                        if not result_ids.intersection(use_ids):
-                            history.pop(i)
-                            # Also strip orphaned tool_result blocks from the now-exposed user msg
-                            if i < len(history) and history[i].get('role') == 'user':
-                                uc = history[i].get('content', [])
-                                if isinstance(uc, list):
-                                    cleaned = [b for b in uc if not (isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') in use_ids)]
-                                    if cleaned != uc: history[i] = {**history[i], 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
-                            continue
-            i += 1
-        # Reverse-orphan cleanup: strip tool_result blocks in user msgs that have no
-        # matching tool_use in the preceding assistant message (e.g. after trim popped
-        # the assistant msg but left the user msg with dangling tool_results).
-        i = 0
-        while i < len(history):
-            m = history[i]
-            if m.get('role') == 'user':
-                uc = m.get('content', [])
-                if isinstance(uc, list):
-                    result_ids = {b.get('tool_use_id') for b in uc if isinstance(b, dict) and b.get('type') == 'tool_result'}
-                    if result_ids:
-                        # Collect tool_use ids from the preceding assistant message
-                        prev_use_ids = set()
-                        if i > 0 and history[i - 1].get('role') == 'assistant':
-                            pc = history[i - 1].get('content', [])
-                            if isinstance(pc, list):
-                                prev_use_ids = {b.get('id') for b in pc if isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('id')}
-                        orphan_ids = result_ids - prev_use_ids
-                        if orphan_ids:
-                            cleaned = [b for b in uc if not (isinstance(b, dict) and b.get('type') == 'tool_result' and b.get('tool_use_id') in orphan_ids)]
-                            history[i] = {**m, 'content': cleaned if cleaned else [{"type": "text", "text": "(trimmed)"}]}
-            i += 1
-        # Leading-role fix: after system msgs, first non-system must be user.
-        # If it's assistant (e.g. trim removed the leading user), insert a placeholder user msg.
-        first_non_sys = 0
-        while first_non_sys < len(history) and history[first_non_sys].get('role') == 'system':
-            first_non_sys += 1
-        if first_non_sys < len(history) and history[first_non_sys].get('role') == 'assistant':
-            history.insert(first_non_sys, {"role": "user", "content": [{"type": "text", "text": "(context trimmed)"}]})
-
-
 def trim_messages_history(history, sess):
     cap = sess.context_win * 3
     target = int(cap * getattr(sess, 'trim_keep_rate', 0.6))
@@ -304,52 +123,21 @@ def _parse_claude_json(data):
         elif b.get("type") == "thinking": yield ""
     return content_blocks
 
-def _sse_response_diag(resp=None, *, elapsed=None, events=None, lines=0, bytes_seen=0, parse_errors=0, extra=None):
-    """Compact transport/parser diagnostics for SSE failures; avoid logging payload/secrets."""
-    parts = []
-    if resp is not None:
-        parts.append(f"status={getattr(resp, 'status_code', '?')}")
-        try:
-            parts.append(f"url={getattr(resp, 'url', '')}")
-        except Exception:
-            pass
-        try:
-            h = getattr(resp, 'headers', {}) or {}
-            safe_headers = {k: h.get(k) for k in ('request-id', 'x-request-id', 'cf-ray', 'anthropic-request-id', 'content-type', 'transfer-encoding') if h.get(k)}
-            if safe_headers: parts.append(f"headers={safe_headers}")
-        except Exception:
-            pass
-    if elapsed is not None: parts.append(f"elapsed={elapsed:.2f}s")
-    if events is not None: parts.append(f"last_events={events}")
-    parts.append(f"lines={lines}")
-    parts.append(f"bytes={bytes_seen}")
-    if parse_errors: parts.append(f"parse_errors={parse_errors}")
-    if extra: parts.append(str(extra))
-    return "; ".join(parts)
-
-def _parse_claude_sse(resp_lines, resp=None, started_at=None):
+def _parse_claude_sse(resp_lines):
     """Parse Anthropic SSE stream. Yields text chunks, returns list[content_block]."""
     content_blocks = []; current_block = None; tool_json_buf = ""
     stop_reason = None; got_message_stop = False; warn = None
-    _last_evt_types = []  # track last event types for diagnostics
-    _line_count = 0; _byte_count = 0; _parse_errors = 0
     for line in resp_lines:
         if not line: continue
-        _line_count += 1
-        try: _byte_count += len(line)
-        except Exception: pass
-        line = line.decode('utf-8', errors='replace') if isinstance(line, bytes) else line
+        line = line.decode('utf-8') if isinstance(line, bytes) else line
         if not line.startswith("data:"): continue
         data_str = line[5:].lstrip()
         if data_str == "[DONE]": break
         try: evt = json.loads(data_str)
         except Exception as e:
-            _parse_errors += 1
-            print(f"[SSE] JSON parse error: {e}; {_sse_response_diag(resp, elapsed=(time.time()-started_at if started_at else None), events=_last_evt_types, lines=_line_count, bytes_seen=_byte_count, parse_errors=_parse_errors)}; line={data_str[:200]}")
+            print(f"[SSE] JSON parse error: {e}, line: {data_str[:200]}")
             continue
         evt_type = evt.get("type", "")
-        _last_evt_types.append(evt_type)
-        if len(_last_evt_types) > 8: _last_evt_types.pop(0)
         if evt_type == "message_start":
             usage = evt.get("message", {}).get("usage", {})
             _record_usage(usage, "messages")
@@ -383,7 +171,6 @@ def _parse_claude_sse(resp_lines, resp=None, started_at=None):
             delta = evt.get("delta", {})
             stop_reason = delta.get("stop_reason", stop_reason)
             out_usage = evt.get("usage", {})
-            if out_usage: _record_usage(out_usage, "messages")
             out_tokens = out_usage.get("output_tokens", 0)
             if out_tokens: print(f"[Output] tokens={out_tokens} stop_reason={stop_reason}")
         elif evt_type == "message_stop": got_message_stop = True
@@ -392,13 +179,7 @@ def _parse_claude_sse(resp_lines, resp=None, started_at=None):
             emsg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
             warn = f"\n\n!!!Error: SSE {emsg}"; break
     if not warn:
-        if not got_message_stop and not stop_reason:
-            diag = _sse_response_diag(resp, elapsed=(time.time()-started_at if started_at else None), events=_last_evt_types, lines=_line_count, bytes_seen=_byte_count, parse_errors=_parse_errors)
-            if content_blocks or current_block:
-                # Content received but no proper termination signal — downgrade to log only
-                print(f"[SSE] Stream ended without message_stop/stop_reason; {diag}; {len(content_blocks)} block(s) received. Response usable.")
-            else:
-                warn = f"\n\n[!!! 流异常中断，未收到完整响应 !!!] {diag}"
+        if not got_message_stop and not stop_reason: warn = "\n\n[!!! 流异常中断，未收到完整响应 !!!]"
         elif stop_reason == "max_tokens": warn = "\n\n[!!! Response truncated: max_tokens !!!]"
     if current_block:
         if current_block["type"] == "tool_use":
@@ -407,11 +188,7 @@ def _parse_claude_sse(resp_lines, resp=None, started_at=None):
         content_blocks.append(current_block); current_block = None
     if warn:
         print(f"[WARN] {warn.strip()}")
-        # Keep transport/parser warnings out of model-visible history.  Emitting
-        # them as chunks makes BaseSession.ask append the warning text as an
-        # assistant message, which can poison subsequent turns after one bad SSE.
-        if warn.startswith("\n\n!!!Error:"):
-            yield warn
+        content_blocks.append({"type": "text", "text": warn}); yield warn
     return content_blocks
 
 def _try_parse_tool_args(raw):
@@ -523,15 +300,8 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
                 blocks.append({"type": "tool_use", "id": bid, "name": tc["name"], "input": inp})
         return blocks
 
-_LAST_USAGE = {}
-
-def last_usage():
-    return dict(_LAST_USAGE)
-
 def _record_usage(usage, api_mode):
     if not usage: return
-    global _LAST_USAGE
-    _LAST_USAGE = {**_LAST_USAGE, **usage}
     if api_mode == 'responses':
         cached = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
         inp = usage.get("input_tokens", 0); out = usage.get("output_tokens", 0)
@@ -598,84 +368,33 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
     for attempt in range(sess.max_retries + 1):
         streamed = False
         try:
-            _req_started_at = time.time()
             with requests.post(url, headers=headers, json=payload, stream=sess.stream, 
                                timeout=(sess.connect_timeout, sess.read_timeout), proxies=sess.proxies, verify=sess.verify) as r:
                 if r.status_code >= 400:
                     if r.status_code in _RETRYABLE and attempt < sess.max_retries:
                         d = _delay(r, attempt)
-                        print(f"[NET_RETRY_HTTP] [LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1}) url={url}")
+                        print(f"[LLM Retry] HTTP {r.status_code}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
                         time.sleep(d); continue
-                    try: body_full = r.text.strip(); body = body_full[:500]
-                    except: body_full = body = ""
-                    # Dump full payload + response on 400 for post-mortem diagnosis
-                    if r.status_code == 400:
-                        try:
-                            import datetime as _dt
-                            _dump = {"ts": _dt.datetime.now().isoformat(), "url": url,
-                                     "status": 400, "response_body": body_full,
-                                     "payload": payload}
-                            _dpath = os.path.join(os.path.dirname(__file__), "debug_400_dump.json")
-                            with open(_dpath, "w", encoding="utf-8") as _df:
-                                json.dump(_dump, _df, ensure_ascii=False, indent=1, default=str)
-                        except Exception: pass
-                    # Structured-error diagnostic for 400: detect known patterns
-                    diag = ""
-                    if r.status_code == 400:
-                        bl = body.lower()
-                        if "tool call" in bl or "function_call" in bl or "call_id" in bl:
-                            diag = " [DIAG: orphan tool_call/function_call_output in request — payload structure mismatch, not retryable]"
-                        elif "context_length" in bl or "token" in bl:
-                            diag = " [DIAG: context length exceeded, not retryable without trimming]"
-                        else:
-                            diag = " [DIAG: 400 is a structural request error, not retryable]"
-                    err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "") + diag
+                    try: body = r.text.strip()[:500]
+                    except: body = ""
+                    err = f"!!!Error: HTTP {r.status_code}" + (f": {body}" if body else "")
                     yield err; return [{"type": "text", "text": err}]
-                gen = parse_fn(r, _req_started_at)
+                gen = parse_fn(r)
                 try:
                     while True: streamed = True; yield next(gen)
                 except StopIteration as e:
                     if not e.value and not streamed: raise requests.ConnectionError("empty response")
                     return e.value or []
         except (requests.Timeout, requests.ConnectionError) as e:
-            _elapsed = time.time() - _req_started_at
-            _phase = "mid-stream" if streamed else "connect"
             err = f"!!!Error: {type(e).__name__}"
-            # Full diagnostic for post-mortem (e.g. ChunkedEncodingError = proxy/server dropped mid-stream)
-            print(f"[NET_ERR_DETAIL] {type(e).__name__} ({_phase}, {_elapsed:.1f}s): {e}")
             if attempt < sess.max_retries:
                 d = _delay(None, attempt)
-                print(f"[NET_RETRY_EXC] [LLM Retry] {type(e).__name__} ({_phase}), retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1}) url={url} elapsed={_elapsed:.1f}s")
+                print(f"[LLM Retry] {type(e).__name__}, retry in {d:.1f}s ({attempt+1}/{sess.max_retries+1})")
                 yield err; time.sleep(d); continue
             yield err; return [{"type": "text", "text": err}]
         except Exception as e:
             err = f"\n\n[!!! 流异常中断 {type(e).__name__}: {e} !!!]" if streamed else f"!!!Error: {type(e).__name__}: {e}"
             yield err; return [{"type": "text", "text": err}]
-
-def _is_thinking_model(model_name):
-    """Detect if a model requires reasoning_content pass-back (thinking/reasoning mode)."""
-    ml = model_name.lower()
-    # Models known to require reasoning_content in history
-    return any(k in ml for k in ('mimo', 'minimax', 'deepseek-r', 'deepseek-reasoner', 'qwq'))
-
-def _adapt_reasoning_for_model(messages, model):
-    """Adapt reasoning_content fields in OAI-format messages based on target model capability.
-    
-    - Thinking models: ensure every assistant message has reasoning_content (empty string if missing)
-    - Non-thinking models: strip reasoning_content to avoid confusing the API
-    """
-    thinking = _is_thinking_model(model)
-    for msg in messages:
-        if msg.get("role") != "assistant":
-            continue
-        if thinking:
-            # Ensure field exists; API requires it even if empty
-            if "reasoning_content" not in msg:
-                msg["reasoning_content"] = ""
-        else:
-            # Strip reasoning_content for models that don't support it
-            msg.pop("reasoning_content", None)
-    return messages
 
 def _openai_stream(sess, messages):
     model, api_mode = sess.model, sess.api_mode
@@ -684,37 +403,26 @@ def _openai_stream(sess, messages):
     if 'kimi' in ml or 'moonshot' in ml: temperature = 1
     elif 'minimax' in ml: temperature = max(0.01, min(temperature, 1.0))  # MiniMax requires temp in (0, 1]
     headers = {"Authorization": f"Bearer {sess.api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"}
+    headers["User-Agent"] = sess.user_agent
     if api_mode == "responses":
         url = auto_make_url(sess.api_base, "responses")
-        responses_input = _sanitize_responses_tool_chain(_to_responses_input(messages))
-        orphans = _responses_tool_chain_orphans(responses_input)
-        if orphans: raise ValueError(f"Responses input still has orphan function_call_output item(s): {orphans[:3]}")
-        if not responses_input:
-            err = "!!!Error: [Guard] input is empty after conversion — skipping API call to avoid 400. Check upstream message construction."
-            print(err)
-            yield err
-            return []
-        payload = {"model": model, "input": responses_input, "stream": sess.stream, 
+        payload = {"model": model, "input": _to_responses_input(messages), "stream": sess.stream, 
                    "prompt_cache_key": _RESP_CACHE_KEY, "instructions": sess.system or "You are an Omnipotent Executor."}
         if sess.reasoning_effort: payload["reasoning"] = {"effort": sess.reasoning_effort}
         if sess.max_tokens: payload["max_output_tokens"] = sess.max_tokens
     else:
         url = auto_make_url(sess.api_base, "chat/completions")
         if sess.system: messages = [{"role": "system", "content": sess.system}] + messages
-        _adapt_reasoning_for_model(messages, model)
         _stamp_oai_cache_markers(messages, model)
         payload = {"model": model, "messages": messages, "stream": sess.stream}
         if sess.stream: payload["stream_options"] = {"include_usage": True}
         if temperature != 1: payload["temperature"] = temperature
         if sess.max_tokens: payload["max_completion_tokens" if ml.startswith(("gpt-5", "o1", "o2", "o3", "o4")) else "max_tokens"] = sess.max_tokens
         if sess.reasoning_effort: payload["reasoning_effort"] = sess.reasoning_effort
-        # --- 修复 Bug2a: PackyAPI 要求 conversation_id ---
-        if "packyapi.com" in (sess.api_base or ""):
-            payload["conversation_id"] = sess._session_id if hasattr(sess, '_session_id') else str(id(sess))
     tools = getattr(sess, 'tools', None)
     if tools: payload["tools"] = _prepare_oai_tools(tools, api_mode)
     if sess.service_tier: payload["service_tier"] = sess.service_tier
-    parse_fn = (lambda r, _t=None: _parse_openai_sse(r.iter_lines(), api_mode)) if sess.stream else (lambda r, _t=None: _parse_openai_json(r.json(), api_mode))
+    parse_fn = (lambda r: _parse_openai_sse(r.iter_lines(), api_mode)) if sess.stream else (lambda r: _parse_openai_json(r.json(), api_mode))
     return (yield from _stream_with_retry(sess, url, headers, payload, parse_fn))
         
 def _prepare_oai_tools(tools, api_mode="chat_completions"):
@@ -729,19 +437,12 @@ def _prepare_oai_tools(tools, api_mode="chat_completions"):
     return tools
 
 def _to_responses_input(messages):
-    result, pending, seen_calls = [], [], set()
-    orphan_tool_outputs = 0
+    result, pending = [], []
     for msg in messages:
         role = str(msg.get("role", "user")).lower()
         if role == "tool":
-            explicit_cid = msg.get("tool_call_id")
-            cid = explicit_cid or (pending.pop(0) if pending else "")
-            if cid and cid in seen_calls:
-                result.append({"type": "function_call_output", "call_id": cid, "output": msg.get("content", "") or "(completed)"})
-            else:
-                orphan_tool_outputs += 1
-                content = msg.get("content", "")
-                result.append({"role": "user", "content": [{"type": "input_text", "text": f"[orphan tool output converted to text; call_id={cid or 'missing'}]\n{content}"}]})
+            cid = msg.get("tool_call_id") or (pending.pop(0) if pending else f"call_{uuid.uuid4().hex[:8]}")
+            result.append({"type": "function_call_output", "call_id": cid, "output": msg.get("content", "")})
             continue
         if role not in ["user", "assistant", "system", "developer"]: role = "user"
         if role == "system": role = "developer"  # Responses API uses 'developer' instead of 'system'
@@ -766,67 +467,13 @@ def _to_responses_input(messages):
         for tc in (msg.get("tool_calls") or []):
             f = tc.get("function", {})
             cid = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
-            pending.append(cid); seen_calls.add(cid)
+            pending.append(cid)
             result.append({"type": "function_call", "call_id": cid, "name": f.get("name", ""), "arguments": f.get("arguments", "")})
-    if orphan_tool_outputs: print(f"[WARN] Converted {orphan_tool_outputs} orphan tool output(s) before Responses API call.")
     return result
 
 
-def _sanitize_responses_tool_chain(input_items):
-    """Final guardrail for OpenAI Responses input: every function_call must have a matching output."""
-    output_call_ids = {
-        item.get("call_id") for item in (input_items or [])
-        if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id")
-    }
-    seen_calls, cleaned, orphan_outputs, dangling_calls = set(), [], 0, 0
-    for item in input_items or []:
-        if not isinstance(item, dict):
-            cleaned.append(item); continue
-        typ = item.get("type")
-        if typ == "function_call":
-            cid = item.get("call_id")
-            if cid and cid in output_call_ids:
-                seen_calls.add(cid)
-                cleaned.append(item)
-            else:
-                dangling_calls += 1
-                cleaned.append({"role": "user", "content": [{"type": "input_text", "text": f"[dangling function_call converted to text; call_id={cid or 'missing'}; name={item.get('name', '')}]\n{item.get('arguments', '')}"}]})
-        elif typ == "function_call_output":
-            cid = item.get("call_id")
-            if cid and cid in seen_calls:
-                cleaned.append(item)
-            else:
-                orphan_outputs += 1
-                output = item.get("output", "")
-                cleaned.append({"role": "user", "content": [{"type": "input_text", "text": f"[orphan function_call_output converted to text; call_id={cid or 'missing'}]\n{output}"}]})
-        else:
-            cleaned.append(item)
-    if orphan_outputs: print(f"[WARN] Sanitized {orphan_outputs} orphan function_call_output item(s) before Responses API send.")
-    if dangling_calls: print(f"[WARN] Sanitized {dangling_calls} dangling function_call item(s) before Responses API send.")
-    return cleaned
-
-
-def _responses_tool_chain_orphans(input_items):
-    seen_calls, orphans = set(), []
-    for idx, item in enumerate(input_items or []):
-        if not isinstance(item, dict): continue
-        if item.get("type") == "function_call":
-            cid = item.get("call_id")
-            if cid: seen_calls.add(cid)
-        elif item.get("type") == "function_call_output":
-            cid = item.get("call_id")
-            if not cid or cid not in seen_calls: orphans.append((idx, cid or ""))
-    missing_outputs = seen_calls - {
-        item.get("call_id") for item in (input_items or [])
-        if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id")
-    }
-    orphans.extend((None, cid) for cid in sorted(missing_outputs))
-    return orphans
-
-
 def _msgs_claude2oai(messages):
-    result, seen_tool_uses = [], set()
-    orphan_tool_results = 0
+    result = []
     for msg in messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
@@ -838,38 +485,28 @@ def _msgs_claude2oai(messages):
                 if b.get("type") == "thinking" and b.get("thinking"): reasoning = b["thinking"]
                 elif b.get("type") == "text" and b.get("text"): text_parts.append({"type": "text", "text": b.get("text", "")})
                 elif b.get("type") == "tool_use":
-                    cid = b.get("id") or ''
-                    if cid: seen_tool_uses.add(cid)
                     tool_calls.append({
-                        "id": cid, "type": "function",
+                        "id": b.get("id") or '', "type": "function",
                         "function": {"name": b.get("name", ""), "arguments": json.dumps(b.get("input", {}), ensure_ascii=False)}
                     })
             m = {"role": "assistant"}
             if reasoning: m["reasoning_content"] = reasoning
             if text_parts: m["content"] = text_parts
-            elif not tool_calls and not reasoning: m["content"] = "."
-            else: m["content"] = None
+            elif not tool_calls: m["content"] = "."
             if tool_calls: m["tool_calls"] = tool_calls
-            if not text_parts and not tool_calls and reasoning: m["content"] = "."
             result.append(m)
         elif role == "user":
             text_parts = []
             for b in blocks:
                 if not isinstance(b, dict): continue
                 if b.get("type") == "tool_result":
+                    if text_parts:
+                        result.append({"role": "user", "content": text_parts})
+                        text_parts = []
                     tr = b.get("content", "")
                     if isinstance(tr, list):
                         tr = "\n".join(x.get("text", "") for x in tr if isinstance(x, dict) and x.get("type") == "text")
-                    tr = tr if isinstance(tr, str) else str(tr)
-                    tid = b.get("tool_use_id") or ''
-                    if tid in seen_tool_uses:
-                        if text_parts:
-                            result.append({"role": "user", "content": text_parts})
-                            text_parts = []
-                        result.append({"role": "tool", "tool_call_id": tid, "content": tr or "(completed)"})
-                    else:
-                        orphan_tool_results += 1
-                        text_parts.append({"type": "text", "text": f"[orphan tool_result converted to text; tool_use_id={tid or 'missing'}]\n{tr}"})
+                    result.append({"role": "tool", "tool_call_id": b.get("tool_use_id") or '', "content": tr if isinstance(tr, str) else str(tr)})
                 elif b.get("type") == "image":
                     src = b.get("source") or {}
                     if src.get("type") == "base64" and src.get("data"):
@@ -878,28 +515,6 @@ def _msgs_claude2oai(messages):
                 elif b.get("type") == "text" and b.get("text"): text_parts.append({"type": "text", "text": b.get("text", "")})
             if text_parts: result.append({"role": "user", "content": text_parts})
         else: result.append(msg)
-    if orphan_tool_results: print(f"[WARN] Converted {orphan_tool_results} orphan Claude tool_result(s) before OAI conversion.")
-    # Post-pass: detect orphan tool_calls (assistant has tool_call but no matching tool response follows)
-    answered_ids = {m["tool_call_id"] for m in result if m.get("role") == "tool" and m.get("tool_call_id")}
-    orphan_tool_calls = 0
-    for m in result:
-        if m.get("role") == "assistant" and m.get("tool_calls"):
-            surviving, demoted_texts = [], []
-            for tc in m["tool_calls"]:
-                if tc.get("id") in answered_ids:
-                    surviving.append(tc)
-                else:
-                    orphan_tool_calls += 1
-                    fn = tc.get("function", {})
-                    demoted_texts.append(f'[orphan tool_call demoted to text; id={tc.get("id","?")} name={fn.get("name","?")}] args={fn.get("arguments","{}")}')
-            if demoted_texts:
-                m["tool_calls"] = surviving or None
-                if not surviving: del m["tool_calls"]
-                existing = m.get("content") or []
-                if isinstance(existing, str): existing = [{"type": "text", "text": existing}] if existing else []
-                existing.extend({"type": "text", "text": t} for t in demoted_texts)
-                m["content"] = existing or "(empty)"
-    if orphan_tool_calls: print(f"[WARN] Demoted {orphan_tool_calls} orphan OAI tool_call(s) to text in _msgs_claude2oai.")
     return result
 
 
@@ -908,12 +523,11 @@ class BaseSession:
         self.api_key = cfg['apikey']
         self.api_base = cfg['apibase'].rstrip('/')
         self.model = cfg.get('model', '')
-        self.context_win = cfg.get('context_win', 30000)
-        self.history = []
-        # RLock allows ask() error handling to call _heal_history() while the
-        # current turn still holds the session lock.
-        self.lock = threading.RLock()
-        self.system = ""
+        default_context_win = 30000
+        if 'deepseek' in self.model.lower():
+            default_context_win = 70000; self.cut_msg_interval = 25; self.trim_keep_rate = 0.3
+        self.context_win = cfg.get('context_win', default_context_win)
+        self.history = []; self.lock = threading.Lock(); self.system = ""
         self.name = cfg.get('name', self.model)
         proxy = cfg.get('proxy'); 
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
@@ -934,23 +548,12 @@ class BaseSession:
         self.api_mode = 'responses' if mode in ('responses', 'response') else 'chat_completions'
         self.temperature = cfg.get('temperature', 1)
         self.max_tokens = cfg.get('max_tokens')
-    @property
-    def model_trace(self):
-        """Uniform model trace for single-backend sessions.
-
-        MixinSession overrides this with fallback details. Plain sessions still
-        expose the same shape so frontends can display the actual model.
-        """
-        actual = getattr(self, 'name', '') or getattr(self, 'model', '')
-        return {'requested': actual, 'actual': actual, 'fallback_count': 0, 'chain': [actual] if actual else []}
+        self.default_ua = "claude-cli/2.1.152 (external, cli)"
+        self.user_agent = cfg.get("user_agent", self.default_ua)
     def _apply_claude_thinking(self, payload):
-        tt = self.thinking_type
-        # Auto-default: thinking models without explicit thinking_type get "adaptive"
-        if not tt and _is_thinking_model(self.model):
-            tt = 'adaptive'
-        if tt:
-            thinking = {"type": tt}
-            if tt == 'enabled':
+        if self.thinking_type:
+            thinking = {"type": self.thinking_type}
+            if self.thinking_type == 'enabled':
                 if self.thinking_budget_tokens is None: print("[WARN] thinking_type='enabled' requires thinking_budget_tokens, ignored.")
                 else:
                     thinking["budget_tokens"] = self.thinking_budget_tokens; payload["thinking"] = thinking
@@ -959,48 +562,6 @@ class BaseSession:
             effort = {'low': 'low', 'medium': 'medium', 'high': 'high', 'xhigh': 'max'}.get(self.reasoning_effort)
             if effort: payload["output_config"] = {"effort": effort}
             else: print(f"[WARN] reasoning_effort {self.reasoning_effort!r} is unsupported for Claude output_config.effort, ignored.")
-    def _heal_history(self):
-        """Remove ALL !!!Error messages (and orphaned user messages whose reply
-        was an error) from history so the session can recover without a restart.
-        Called automatically when repeated errors are detected, and can also be
-        invoked manually via session.heal()."""
-        with self.lock:
-            def _is_error(msg):
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    text_parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-                    content = "\n".join(text_parts)
-                return isinstance(content, str) and content.startswith("!!!Error:")
-
-            # Pass 1: mark error indices and the user msg immediately before each error
-            remove = set()
-            for i, msg in enumerate(self.history):
-                if _is_error(msg):
-                    remove.add(i)
-                    # If the previous message is a user msg, it's dangling (its reply was the error)
-                    if i > 0 and self.history[i - 1].get("role") == "user":
-                        remove.add(i - 1)
-
-            # Pass 2: also strip trailing dangling user msg (no reply follows)
-            while self.history:
-                last_idx = len(self.history) - 1
-                if last_idx in remove:
-                    break  # already marked
-                if self.history[last_idx].get("role") == "user":
-                    remove.add(last_idx)
-                else:
-                    break
-
-            if not remove:
-                return 0
-
-            self.history = [msg for i, msg in enumerate(self.history) if i not in remove]
-            changed = len(remove)
-            print(f"[HEAL] Removed {changed} error/dangling message(s) from session history.")
-            return changed
-    def heal(self):
-        """Public API: heal a poisoned session by stripping error messages."""
-        return self._heal_history()
     def ask(self, prompt):
         def _ask_gen():
             with self.lock:
@@ -1017,21 +578,8 @@ class BaseSession:
                 if block.get('type', '') == 'tool_use':
                     tu = {'name': block.get('name', ''), 'arguments': block.get('input', {})}
                     yield f'<tool_use>{json.dumps(tu, ensure_ascii=False)}</tool_use>'
-            # Do not persist transport/parser warning banners as assistant
-            # content; otherwise one interrupted stream can poison all later
-            # requests in the same session.
-            if content.startswith("!!!Error:"):
-                # Auto-heal: also remove the user message we just appended for
-                # this failed turn, so the next ask() starts from a clean state
-                # instead of carrying a dangling user msg that triggers 400 loops.
-                with self.lock:
-                    self._heal_history()
-            elif content.strip():
-                for marker in ("\n\n[!!! 流异常中断", "\n\n[!!! Response truncated:"):
-                    if marker in content:
-                        content = content.split(marker, 1)[0]
-                self.history.append({"role": "assistant", "content": [{"type": "text", "text": content}]})
-        return _ask_gen() if self.stream else ''.join(list(_ask_gen()))
+            if content.strip() and not content.startswith("!!!Error:"): self.history.append({"role": "assistant", "content": [{"type": "text", "text": content}]})
+        return _ask_gen()
 
 def _keep_claude_block(b): return not isinstance(b, dict) or b.get("type") != "thinking" or b.get("signature")
 def _drop_unsigned_thinking(messages):
@@ -1042,7 +590,7 @@ def _drop_unsigned_thinking(messages):
 
 def _ensure_thinking_blocks(messages, model):
     """deepseek needs thinking in history!"""
-    if not _is_thinking_model(model): return messages
+    if 'deepseek' not in model.lower(): return messages
     for m in messages:
         if m.get("role") != "assistant": continue
         c = m.get("content")
@@ -1053,18 +601,15 @@ def _ensure_thinking_blocks(messages, model):
 
 class ClaudeSession(BaseSession):
     def raw_ask(self, messages):
-        if not messages:
-            print("[WARN] ClaudeSession.raw_ask: empty messages, returning empty"); return ""
         messages = _fix_messages(messages)
         if self.max_tokens is None: self.max_tokens = 8192
-        messages = _fix_messages(messages)
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json", "anthropic-version": "2023-06-01", "anthropic-beta": "prompt-caching-2024-07-31"}
         payload = {"model": self.model, "messages": messages, "max_tokens": self.max_tokens, "stream": self.stream}
         if self.temperature != 1: payload["temperature"] = self.temperature
         self._apply_claude_thinking(payload)
         if self.system: payload["system"] = [{"type": "text", "text": self.system, "cache_control": {"type": "persistent"}}]
         url = auto_make_url(self.api_base, "messages")
-        parse_fn = (lambda r, _t=None: _parse_claude_sse(r.iter_lines(), r, _t)) if self.stream else (lambda r, _t=None: _parse_claude_json(r.json()))
+        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines())) if self.stream else (lambda r: _parse_claude_json(r.json()))
         return (yield from _stream_with_retry(self, url, headers, payload, parse_fn))
     def make_messages(self, raw_list):
         msgs = _drop_unsigned_thinking([{"role": m['role'], "content": list(m['content'])} for m in raw_list])
@@ -1074,10 +619,7 @@ class ClaudeSession(BaseSession):
         return msgs
 
 class LLMSession(BaseSession):
-    def raw_ask(self, messages):
-        if not messages:
-            print("[WARN] LLMSession.raw_ask: empty messages, returning empty"); return ""
-        return (yield from _openai_stream(self, messages))
+    def raw_ask(self, messages): return (yield from _openai_stream(self, messages))
     def make_messages(self, raw_list): return _msgs_claude2oai(_fix_messages(raw_list))
 
 def _fix_messages(messages):
@@ -1120,37 +662,12 @@ class NativeClaudeSession(BaseSession):
     def __init__(self, cfg):
         super().__init__(cfg)
         self.fake_cc_system_prompt = cfg.get("fake_cc_system_prompt", False)
-        self.user_agent = cfg.get("user_agent", "claude-cli/2.1.152 (external, cli)")
         self._session_id = str(uuid.uuid4())
         self._account_uuid = str(uuid.uuid4())
         self._device_id = uuid.uuid4().hex + uuid.uuid4().hex[:32]
         self.tools = None
+        if self.user_agent == self.default_ua: self.user_agent = "claude-cli/2.1.152 (native, cli)"
     def raw_ask(self, messages):
-        if not messages:
-            return {"role": "assistant", "content": "(empty input)", "empty_guard": True}
-        fixed = _fix_messages(messages)
-        # Skip _drop_unsigned_thinking for thinking models: third-party providers (e.g. MiniMax)
-        # don't use Anthropic's signature mechanism — their thinking blocks have empty signatures
-        # and would be incorrectly stripped. For native Claude, blocks have real signatures so
-        # _drop_unsigned_thinking is a no-op anyway.
-        if _is_thinking_model(self.model):
-            messages = _ensure_thinking_blocks(fixed, self.model)
-        else:
-            messages = _ensure_thinking_blocks(_drop_unsigned_thinking(fixed), self.model)
-        # 非原生Anthropic节点: 第三方中转(如CodeWhisperer)不支持thinking block type
-        # 但如果当前session是thinking模型(如MiniMax mimo-v2.5-pro), 必须保留thinking blocks
-        if not self.api_key.startswith("sk-ant-") and not self.thinking_type and not _is_thinking_model(self.model):
-            for _m in messages:
-                _c = _m.get("content")
-                if isinstance(_c, list):
-                    _m["content"] = [_b for _b in _c if not (isinstance(_b, dict) and _b.get("type") == "thinking")]
-        # --- 修复 Bug3: 过滤空 text content block (MiniMax等端点拒绝) ---
-        for _m in messages:
-            _c = _m.get("content")
-            if isinstance(_c, list):
-                _m["content"] = [_b for _b in _c if not (isinstance(_b, dict) and _b.get("type") == "text" and not _b.get("text", "").strip())]
-                if not _m["content"]:
-                    _m["content"] = [{"type": "text", "text": "(empty)"}]
         if self.max_tokens is None: self.max_tokens = 8192
         model = self.model
         messages = _fix_messages(messages)
@@ -1187,56 +704,8 @@ class NativeClaudeSession(BaseSession):
         for idx in user_idxs[-2:]:
             messages[idx] = {**messages[idx], "content": list(messages[idx]["content"])}
             messages[idx]["content"][-1] = dict(messages[idx]["content"][-1], cache_control={"type": "ephemeral"})
-        # --- 方案A: 非原生Anthropic节点 payload/header 白名单清洗 ---
-        if not self.api_key.startswith("sk-ant-"):
-            _PAYLOAD_WHITELIST = {"model", "messages", "max_tokens", "stream", "temperature", "system", "tools", "tool_choice", "stop_sequences", "top_p", "top_k", "thinking", "output_config"}
-            for _pk in list(payload.keys()):
-                if _pk not in _PAYLOAD_WHITELIST:
-                    del payload[_pk]
-            # system: 去掉 cache_control
-            if "system" in payload and isinstance(payload["system"], list):
-                payload["system"] = [{"type": b.get("type", "text"), "text": b.get("text", "")} for b in payload["system"] if isinstance(b, dict)]
-            # tools: 去掉每个 tool 上的 cache_control
-            if "tools" in payload and isinstance(payload["tools"], list):
-                for _t in payload["tools"]:
-                    _t.pop("cache_control", None)
-            # messages: 去掉 content block 上的 cache_control
-            for _m in payload.get("messages", []):
-                _c = _m.get("content")
-                if isinstance(_c, list):
-                    for _b in _c:
-                        if isinstance(_b, dict):
-                            _b.pop("cache_control", None)
-            # headers: 去掉不兼容的 beta flags, 只保留基础版本头
-            headers.pop("anthropic-beta", None)
-            headers.pop("anthropic-dangerous-direct-browser-access", None)
-            headers.pop("x-app", None)
-        url = auto_make_url(self.api_base, "messages")
-        if self.api_key.startswith("sk-ant-"):
-            url += '?beta=true'
-        # [DEBUG] dump payload to file for debugging
-        if not self.api_key.startswith("sk-ant-"):
-            try:
-                import datetime
-                with open(r"D:\AI\GenericAgent\temp\debug_buzz.json", "w", encoding="utf-8") as _df:
-                    json.dump({
-                        "ts": str(datetime.datetime.now()),
-                        "thinking_in_payload": "thinking" in payload,
-                        "output_config": payload.get("output_config"),
-                        "metadata": payload.get("metadata"),
-                        "beta_header": headers.get("anthropic-beta", ""),
-                        "tools_count": len(payload.get("tools", [])),
-                        "system_type": type(payload.get('system')).__name__,
-                        "system_len": len(str(payload.get('system', ''))),
-                        "msg_count": len(messages),
-                        "msg_content_types": [b.get("type") for m in messages for b in (m.get("content") or []) if isinstance(b, dict)],
-                        "max_tokens": payload.get("max_tokens"),
-                        "model": payload.get("model"),
-                        "stream": payload.get("stream"),
-                    }, _df, ensure_ascii=False, indent=2)
-            except Exception as _dbg_err:
-                pass
-        parse_fn = (lambda r, _t=None: _parse_claude_sse(r.iter_lines(), r, _t)) if self.stream else (lambda r, _t=None: _parse_claude_json(r.json()))
+        url = auto_make_url(self.api_base, "messages") + '?beta=true'
+        parse_fn = (lambda r: _parse_claude_sse(r.iter_lines())) if self.stream else (lambda r: _parse_claude_json(r.json()))
         return (yield from _stream_with_retry(self, url, headers, payload, parse_fn))
 
     def ask(self, msg):
@@ -1269,8 +738,6 @@ class NativeClaudeSession(BaseSession):
 
 class NativeOAISession(NativeClaudeSession):
     def raw_ask(self, messages):
-        if not messages:
-            print("[WARN] NativeOAISession.raw_ask: empty messages, returning empty"); return ""
         messages = _fix_messages(messages)
         messages = _ensure_thinking_blocks(messages, self.model)
         return (yield from _openai_stream(self, _msgs_claude2oai(messages)))
@@ -1450,7 +917,7 @@ def _write_llm_log(label, content, log_path=None):
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(log_path, 'a', encoding='utf-8', errors='replace') as f:
-        f.write(f"=== {label} === {ts} session={_SESSION_LOG_ID}\n{content}\n\n")
+        f.write(f"=== {label} === {ts}\n{content}\n\n")
 
 def tryparse(json_str):
     try: return json.loads(json_str)
@@ -1479,7 +946,6 @@ class MixinSession:
         self._orig_raw_asks = [s.raw_ask for s in self._sessions]
         self._sessions[0].raw_ask = self._raw_ask
         self._cur_idx, self._switched_at = 0, 0.0
-        self._model_trace = {'requested': '', 'actual': '', 'fallback_count': 0, 'chain': []}
     def __getattr__(self, name): return getattr(self._sessions[0], name)
     _BROADCAST_ATTRS = frozenset({'system', 'tools', 'temperature', 'max_tokens', 'reasoning_effort', 'history', 'stream', 'read_timeout'})
     def __setattr__(self, name, value):
@@ -1495,36 +961,11 @@ class MixinSession:
     def _pick(self):
         if self._cur_idx and time.time() - self._switched_at > self._spring_sec: self._cur_idx = 0
         return self._cur_idx
-    @property
-    def model_trace(self):
-        return dict(self._model_trace)
-
     def _raw_ask(self, *args, **kwargs):
         base, n = self._pick(), len(self._sessions)
         test_error = lambda x: isinstance(x, str) and x.lstrip().startswith(('!!!Error:', '[Error:'))
-        # Record requested model from primary session
-        try:
-            primary_name = getattr(self._sessions[base], 'name', f's{base}')
-            if not self._model_trace['requested']:
-                self._model_trace['requested'] = primary_name
-            self._model_trace['chain'] = [primary_name]
-        except Exception:
-            pass
         for attempt in range(self._retries + 1):
             idx = (base + attempt) % n
-            target = self._sessions[idx]
-            # Fallback时重新从target的history获取消息，避免跨provider格式不匹配
-            # 所有backend的raw_ask都接收Claude格式，内部自行转换
-            if attempt > 0:
-                fallback_hist = list(target.history)
-                if not fallback_hist:
-                    # target history为空(广播未同步/浅拷贝)，从primary session获取
-                    fallback_hist = list(self._sessions[base].history)
-                if not fallback_hist:
-                    print(f'[MixinSession] WARN: empty history on fallback s{idx}, skip')
-                    continue
-                args = (fallback_hist,)
-                kwargs = {}
             gen = self._orig_raw_asks[idx](*args, **kwargs)
             print(f'[MixinSession] Using session ({self._sessions[idx].name})')
             last_chunk, return_val, yielded = None, [], False
@@ -1534,35 +975,16 @@ class MixinSession:
                     if not yielded and test_error(chunk): continue
                     yield chunk; yielded = True
             except StopIteration as e: return_val = e.value or []
-            except Exception as e:
-                # 捕获底层异常(ConnectionError/Timeout/ChunkedEncodingError等)
-                print(f'[MixinSession] Stream exception in s{idx}: {type(e).__name__}: {e}')
-                last_chunk = f'!!!Error: {type(e).__name__}: {str(e)[:200]}'
-            probes = [last_chunk]
-            if isinstance(return_val, list) and return_val:
-                probes.append(return_val[-1])
-            is_err = any(test_error(p) for p in probes)
-            is_stream_broken = any(isinstance(p, str) and '[!!! 流异常中断' in p for p in probes)
-            if not is_err and not is_stream_broken:
+            is_err = test_error(last_chunk)
+            if not is_err:
                 if attempt > 0: self._cur_idx = idx; self._switched_at = time.time()
-                # Update trace with actual successful session
-                self._model_trace['actual'] = getattr(self._sessions[idx], 'name', f's{idx}')
-                self._model_trace['fallback_count'] = attempt
+                elif isinstance(last_chunk, str) and '[!!! 流异常中断' in last_chunk and n > 1:
+                    self._cur_idx = (idx + 1) % n; self._switched_at = time.time()
+                    print(f'[MixinSession] Partial failure, next call → s{self._cur_idx} ({self._sessions[self._cur_idx].name})')
                 return return_val
             if attempt >= self._retries:
-                yield last_chunk
-                self._model_trace['actual'] = getattr(self._sessions[idx], 'name', f's{idx}')
-                self._model_trace['fallback_count'] = attempt + 1
-                # D: heal all sessions to prevent error pollution persisting across calls
-                for s in self._sessions:
-                    if hasattr(s, '_heal_history'):
-                        s._heal_history()
-                return return_val
+                yield last_chunk; return return_val
             nxt = (base + attempt + 1) % n
-            try:
-                self._model_trace['chain'].append(getattr(self._sessions[nxt], 'name', f's{nxt}'))
-            except Exception:
-                pass
             if nxt == base:  # full round failed, delay before next
                 rnd = (attempt + 1) // n
                 delay = min(30, self._base_delay * (1.5 ** rnd))
@@ -1609,10 +1031,10 @@ class NativeToolClient:
         for tr in tool_results:
             tool_use_id, content = tr.get("tool_use_id", ""), tr.get("content", "")
             tr_id_set.add(tool_use_id)
-            if tool_use_id: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": tr.get("content", "") or "(completed)"})
+            if tool_use_id: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": tr.get("content", "")})
             else: combined_content = [{"type": "text", "text": f'<tool_result>{content}</tool_result>'}] + combined_content
         for tid in self._pending_tool_ids:
-            if tid not in tr_id_set: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tid, "content": "(completed)"})
+            if tid not in tr_id_set: tool_result_blocks.append({"type": "tool_result", "tool_use_id": tid, "content": ""})
         self._pending_tool_ids = []
         # Filter whitespace-only text blocks that cause 400 on strict API proxies
         filtered_content = [c for c in combined_content if c.get("text", "").strip()]

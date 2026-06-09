@@ -61,16 +61,10 @@ def render_sidebar():
     st.caption(f"LLM Core: {llm_labels.get(current_idx, str(current_idx))}")
     selected_idx = st.selectbox("LLM", [idx for idx, _, _ in llm_options], index=next((i for i, (idx, _, _) in enumerate(llm_options) if idx == current_idx), 0), format_func=llm_labels.get, label_visibility="collapsed", key="sidebar_llm_select")
     if selected_idx != current_idx:
-        agent.next_llm(selected_idx)
-        agent.baseline_llm_no = agent.llm_no
-        agent.llm_locked = True
-        st.rerun()
-    last_reply_time = st.session_state.get('last_reply_time', 0)
-    if last_reply_time > 0:
-        st.caption(f"空闲时间：{int(time.time()) - last_reply_time}秒", help="当超过30分钟未收到回复时，系统会自动任务")
-    if st.button("强行停止任务"):
-        agent.abort(); st.toast("已发送停止信号"); st.rerun()
-    if st.button("重新注入工具"):
+        agent.next_llm(selected_idx); st.rerun(scope="fragment")
+    if st.button(T('force_stop')):
+        agent.abort(); st.toast("Stop signal sended"); st.rerun()
+    if st.button(T('reinject_tools')):
         agent.llmclient.last_tools = ''
         try:
             hist_path = os.path.join(script_dir, '..', 'assets', 'tool_usable_history.json')
@@ -234,9 +228,6 @@ for msg in st.session_state.messages:
 
 # Scroll-height ghost fix: during streaming, expander open/close mid-animation can leave
 # phantom height → scrollbar long but can't scroll to bottom. Periodically detect & reflow.
-# Use st.html (fire-and-forget, no rerun) instead of st.iframe/components.v1.html
-# which are Streamlit "components" that trigger an extra rerun on first mount,
-# swallowing the chat_input value (first Enter lost).
 try:
     from streamlit import iframe as _st_iframe  # 1.56+
     _embed_html = lambda html, **kw: _st_iframe(html, **{k: max(v, 1) if isinstance(v, int) else v for k, v in kw.items()})
@@ -267,7 +258,7 @@ _js_ime_fix = ("" if os.name == 'nt' else
     "e.key==='Enter'&&!e.shiftKey&&(e.isComposing||c||e.keyCode===229)&&"
     "(e.stopImmediatePropagation(),e.preventDefault())},!0))})}"
     "f();new MutationObserver(f).observe(d.body,{childList:1,subtree:1})}()")
-st.html(f'<script>{_js_scroll_fix};{_js_ime_fix}</script>')
+_embed_html(f'<script>{_js_ime_fix}</script>', height=0)
 
 _injected = st.session_state.pop('_inject_prompt', None)
 prompt = st.chat_input("any task?") or _injected

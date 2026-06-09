@@ -1,17 +1,5 @@
 # ljqCtrl 使用与坐标转换 SOP
 
-## Struct Header
-- Reader: GA 总控 / subagent / 需要键鼠操控的脚本
-- When to read: 需要通过 ljqCtrl 执行鼠标点击、按键、找图等 GUI 操作时。
-- Trigger: 需要模拟鼠标点击/移动/双击、键盘按键、找图匹配等 GUI 交互；需要 High-DPI 物理坐标换算。
-- Inputs: 目标窗口标题；逻辑坐标（从 pygetwindow / win32gui 获取）；`ljqCtrl.dpi_scale` 缩放系数；找图模板文件路径（FindBlock）。
-- Outputs: 鼠标/键盘操作完成（Click / Press / MouseDClick / SetCursorPos）；FindBlock 返回 `((center_x, center_y), is_found)`。
-- Tools: `ljqCtrl`（Click / SetCursorPos / Press / FindBlock / MouseDClick）；`pygetwindow`（窗口枚举与激活）；`pyperclip`（文本粘贴）；`win32gui`（ClientToScreen / GetWindowRect）。
-- Side effects: 物理鼠标移动/点击/按键；窗口前台切换。
-- Risk: 传入逻辑坐标而非物理坐标导致偏移；窗口未 activate 就操作导致点击到错误窗口；win32 DPI 坐标陷阱（未 SetProcessDPIAware 时坐标不一致）；GetWindowRect 包含标题栏而截图不含；手动重复计算 dpi_scale。
-- Failure path: 坐标偏移 → 检查是否正确转换物理坐标；点击到错误窗口 → 确认 gw.activate() 已执行；win32 坐标不一致 → 先调 SetProcessDPIAware()；FindBlock 找不到 → 调低 threshold。
-- Review: 一律使用物理坐标（=截图像素坐标）；操作前必须 activate 窗口；禁止 pyautogui；禁止逻辑/物理坐标混用；文本输入用 pyperclip.copy + Ctrl+V。
-
 > **must call update working ckp**：`一律使用物理坐标｜禁pyautogui｜操作前先激活窗口`
 
 ## 0. API 快速参考 (Signatures)
@@ -22,6 +10,7 @@
 - `ljqCtrl.GrabWindow(hwnd_or_name)`: 前台截图(先Activate), 传hwnd(int)或窗口标题子串(str), 返回PIL Image
 - `ljqCtrl.GrabWindowBg(hwnd_or_name, timeout=5)`: WGC后台截图(Win10+)
 - `ljqCtrl.MouseDClick(staytime=0.05)`: 鼠标双击
+- 可先阅读computer_use.md
 
 ## 1. 环境载入
 import ljqCtrl
@@ -46,6 +35,7 @@ ljqCtrl.Click(ox + (bbox[0]+bbox[2])//2, oy + (bbox[1]+bbox[3])//2)
 - **⚠️ 一律使用物理坐标**：传给 ljqCtrl.Click/SetCursorPos 的坐标必须是物理坐标（=截图像素坐标）。禁止传入逻辑坐标。
 - **物理验证**：模拟操作前必须确保窗口已通过 `activate()` 置于前台。
 - **坐标对齐**: 物理坐标 = 截图坐标；ljqCtrl 自动处理 DPI 换算，禁止手动重复计算。
-- **⚠️ 窗口坐标转换陷阱**：使用 `win32gui.GetWindowRect(hwnd)` 获取的矩形包含标题栏和边框，而截图内容是客户区。点击截图内元素时，必须用 `win32gui.ClientToScreen(hwnd, (0, 0))` 获取客户区原点的屏幕坐标，再加上截图内坐标。禁止直接用 GetWindowRect 左上角 + 截图坐标。
+- **⚠️ 窗口坐标转换陷阱**：使用 `win32gui.GetWindowRect(hwnd)` 获取的矩形包含标题栏和边框，而截图内容是客户区。点击截图内元素时，必须用 `win32gui.ClientToScreen(hwnd, (0, 0))` 获取客户区原点的屏幕坐标，再加上截图内坐标。禁止直接用 GetWindowRect 左上角 + 截图坐标。**同理禁止 `DwmGetWindowAttribute(hwnd, 9, ...)` 取窗口矩形替代 ClientToScreen，它也包含标题栏/阴影。**
+- **⚠️ Click 后 0% 像素变化 = 点歪了**：ljqCtrl.Click 会报告像素变化百分比。若为 0% 或接近 0%，说明点击落在了错误位置（坐标计算有误），必须立即停下来诊断坐标转换逻辑，禁止盲目重试。常见原因：用了错误的窗口原点API、忘记 `/dpi_scale`、混淆了客户区与窗口矩形。
 - **⚠️ win32 DPI 坐标陷阱**：未调用 `SetProcessDPIAware()` 时，`GetWindowRect/ClientToScreen/GetClientRect` 等拿到的窗口/客户区坐标通常是**逻辑坐标**，必须进行换算！
 - **文本输入**：ljqCtrl 无 TypeText/SendKeys。向输入框键入文本：先点击/三击选中字段，再 `pyperclip.copy('文本'); ljqCtrl.Press('ctrl+v')`。

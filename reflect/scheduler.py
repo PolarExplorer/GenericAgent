@@ -16,7 +16,7 @@ TASKS = os.path.join(_dir, '../sche_tasks')
 DONE  = os.path.join(_dir, '../sche_tasks/done')
 _LOG  = os.path.join(_dir, '../sche_tasks/scheduler.log')
 
-# --- 日志 ---
+os.makedirs(DONE, exist_ok=True)
 _logger = logging.getLogger('scheduler')
 if not _logger.handlers:
     _logger.setLevel(logging.INFO)
@@ -58,87 +58,6 @@ def _last_run(tid, done_files):
             if latest is None or t > latest: latest = t
         except: continue
     return latest
-
-
-def _parse_schedule(sched):
-    h, m = map(int, sched.split(':'))
-    if not (0 <= h <= 23 and 0 <= m <= 59):
-        raise ValueError(f'invalid time: {sched!r}')
-    return h, m
-
-
-def _repeat_supported(repeat):
-    if repeat in ('once', 'daily', 'weekday', 'weekly', 'monthly'):
-        return True
-    if repeat.startswith('every_'):
-        try:
-            parts = repeat.split('_')
-            n = int(parts[1].rstrip('hdm'))
-            u = parts[1][-1]
-            return n > 0 and u in ('h', 'm', 'd')
-        except (ValueError, IndexError):
-            return False
-    return False
-
-
-def health_check(now=None):
-    """Return scheduler task status without triggering tasks or L4 archive."""
-    now = now or datetime.now()
-    if not os.path.isdir(TASKS):
-        return []
-    done_files = set(os.listdir(DONE)) if os.path.isdir(DONE) else set()
-    rows = []
-    for f in sorted(os.listdir(TASKS)):
-        if not f.endswith('.json'):
-            continue
-        tid = f[:-5]
-        path = os.path.join(TASKS, f)
-        row = {'id': tid, 'file': path}
-        try:
-            with open(path, encoding='utf-8') as fp:
-                task = json.loads(fp.read())
-            row['enabled'] = bool(task.get('enabled', False))
-            repeat = task.get('repeat', 'daily')
-            sched = task.get('schedule', '00:00')
-            max_delay = task.get('max_delay_hours', DEFAULT_MAX_DELAY)
-            row.update({'repeat': repeat, 'schedule': sched, 'max_delay_hours': max_delay})
-            if not row['enabled']:
-                row['status'] = 'DISABLED'
-                rows.append(row)
-                continue
-            if not _repeat_supported(repeat):
-                row.update({'status': 'ERROR', 'error': f'unknown repeat: {repeat!r}'})
-                rows.append(row)
-                continue
-            h, m = _parse_schedule(sched)
-            if repeat == 'weekday' and now.weekday() >= 5:
-                row['status'] = 'HEALTHY'
-                row['reason'] = 'weekend_skip'
-                rows.append(row)
-                continue
-            sched_minutes = h * 60 + m
-            now_minutes = now.hour * 60 + now.minute
-            last = _last_run(tid, done_files)
-            row['last_run'] = last.strftime('%Y-%m-%d_%H%M') if last else None
-            if last and (now - last) < _parse_cooldown(repeat):
-                row['status'] = 'HEALTHY'
-                row['reason'] = 'cooldown'
-            elif now_minutes < sched_minutes:
-                row['status'] = 'HEALTHY'
-                row['reason'] = 'not_due'
-            elif (now_minutes - sched_minutes) > max_delay * 60:
-                row['status'] = 'OVERDUE'
-                row['reason'] = 'past_max_delay'
-            elif last is None:
-                row['status'] = 'NEVER_RUN'
-            else:
-                row['status'] = 'HEALTHY'
-                row['reason'] = 'due_or_ready'
-        except Exception as e:
-            row.update({'status': 'ERROR', 'error': str(e)})
-        rows.append(row)
-    return rows
-
 
 def check():
     # L4 archive cron (silent, every 12h)

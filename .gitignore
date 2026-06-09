@@ -53,6 +53,7 @@ memory/L4_raw_sessions/*
 # ljqCtrl related tools
 !memory/ljqCtrl.py
 !memory/ljqCtrl_sop.md
+!memory/computer_use.md
 
 # procmem_scanner related tools
 !memory/procmem_scanner.py
@@ -106,6 +107,10 @@ memory/L4_raw_sessions/*
 # Memory management
 !memory/memory_cleanup_sop.md
 
+# Checklist/MapReduce
+!memory/checklist_helper.py
+!memory/checklist_sop.md
+
 # Code Review Principles
 !memory/code_review_principles.md
 
@@ -122,25 +127,22 @@ assets/tmwd_cdp_bridge/config.js
 assets/copilot_proxy.pyw
 **log.*
 
-# Memory experiment infrastructure (override memory/* and **log.*)
-!memory/memory_experiment_log.md
-!memory/memory_discovery_taxonomy.md
-!memory/failed_experiment_log.md
-
 # Reflect (ignore new files, whitelist existing)
 reflect/*
 !reflect/autonomous.py
 !reflect/scheduler.py
 !reflect/agent_team_worker.py
 !reflect/goal_mode.py
+!reflect/checklist_master.py
+
+# Conductor IM plugins: 私有插件/配置不入库。示例为 _email_example.py / _lark_example.py
+# （以 _ 开头不会被加载器自动轮询）。去掉下划线/示例后缀复制为 email.py / lark.py 即启用。
+frontends/conductor_im_plugins/wechat.py
+frontends/conductor_im_plugins/email.py
+frontends/conductor_im_plugins/lark.py
+frontends/conductor_im_plugins/config.local.json
 
 # Universal: never track __pycache__ anywhere
 **/__pycache__/
 
-# Local generated backups
-*.bak_*
-*.mvp*_backup
-
 .claude/
-debug_400_dump.json
-training_imgs/
