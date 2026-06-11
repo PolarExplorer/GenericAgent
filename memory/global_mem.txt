@@ -85,24 +85,30 @@
 - **Windows Terminal lnk接管陷阱** (2026-05-28): `.lnk`快捷方式Target直接指定cmd.exe时，即使系统默认终端已设为WT，也不会被WT接管(走旧conhost)。`start "title" cmd /k`同理不被接管。要强制WT必须: lnk Target改为wt.exe，或bat中用`wt -w 0 new-tab cmd /k "..."`。已验证：run_agent.bat.lnk改Target→wt.exe后走WT。GA所有启动/重启bat现已统一GenericAgent env(Py3.12) + WT终端，LangChain env不再被任何GA脚本依赖。GenericAgent env已装textual 8.2.5 + prompt_toolkit 3.0.52(TUI v3依赖)。
 - **约束引擎讨论误报模式** (2026-05-20): GA讨论约束定义时，响应文本自然包含约束关键词触发REG-R020/R023误报。修复: negative_context加`讨论|约束|constraint|review|维护`等讨论上下文术语→pattern匹配但negative_context也匹配→不blocked。MISSING-PS-CAT-TYPE regex有未转义方括号致匹配静默失败。累计20条约束修复(commit 402a320+522c5e4)，dry-run 5/5通过。教训: **修改regex后必须验证编译+dry-run**；讨论约束定义的场景需在negative_context中显式豁免。
 
+## [User Argument Style] <!-- updated: 2026-06-02 -->
+- Before supporting or rejecting a viewpoint, present the strongest counterargument first.
+- If the user challenges a stance, do not yield unless there is new evidence or a strictly stronger argument.
+
 ## [GitHub] <!-- updated: 2026-04-25 -->
 - 用户: PolarExplorer, Token: mykey.py GITHUB_TOKEN (ghp_开头, scopes: repo+read:org)
 - git credential: ~/.git-credentials (store模式), git user: ZhuanZ
 - API认证: `Authorization: token {GITHUB_TOKEN}` → api.github.com (含/search/code等需认证接口)
 - 默认存放: `GA_ROOT/issues/` (按日期+问题命名, 如 2026-04-25_claude_api_400_no_tool_output.md)
 
-## [Git代理] <!-- updated: 2026-04-25 -->
+## [Git代理] <!-- updated: 2026-06-11 -->
 - 环境: 无法直连GitHub，需梯子代理
 - 代理配置: `git config --global http.proxy http://127.0.0.1:8902` + `https.proxy`同
 - 清除: `git config --global --unset http.proxy && git config --global --unset https.proxy`
-- 验证: fetch/pull成功确认代理生效
+- **当前状态**: git直连和代理均不通(8902不可用)，但curl API可达GitHub。同步方案: GitHub Contents API逐文件下载(base64解码文本/二进制)，详见上游同步记录
+- 备选: zip/tar archive下载超时(>60s)，Python urllib也不通，只有小API请求可用
 
-## [上游同步记录] <!-- updated: 2026-05-28 -->
+## [上游同步记录] <!-- updated: 2026-06-11 -->
 - 上游: https://github.com/lsdefine/GenericAgent (origin)
 - Fork: https://github.com/PolarExplorer/GenericAgent (myfork)
-- 最后merge: 2026-05-28 (8bf3e5d→a3d324b, ljqCtrl冲突手动解决)
+- 最后merge: 2026-06-11 (071fb6e→5af2d98, GitHub Contents API逐文件下载)
 - 合并策略: 本地功能保留+官方新特性整合(非覆盖)
-- 2026-05-28合并内容: ljqCtrl Click check参数+Activate稳定切换 | ljqCtrl_sop结构头更新
+- 2026-06-11合并内容: lark conductor IM plugin+模板 | computer_use.md(GUI操作SOP) | checklist_helper.py+sop+checklist_master.py | ga.py/llmcore.py/agentmain.py/refactor | TUI v3剪贴板/粘贴/IME修复 | ljqCtrl坐标修复 | scheduler/reflect修复 | wechat_group21.jpg
+- 方法: git+代理均不通→GitHub API compare获取文件列表→Contents API逐文件base64下载(34文件, 32文本+2二进制)→本地stage+commit
 
 ## [GA架构演进参考] <!-- updated: 2026-04-25 -->
 - 来源: "Agentic Reasoning for LLMs" (UIUC+Meta+Amazon+DeepMind+Yale, 2026, 135页综述)

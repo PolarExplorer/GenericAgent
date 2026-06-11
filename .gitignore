@@ -146,3 +146,13 @@ frontends/conductor_im_plugins/config.local.json
 **/__pycache__/
 
 .claude/
+
+# temp/backup files (neat 2026-06-10)
+debug_400_dump.json
+*.bak_*
+*.mvp4_backup
+bbs_bootstrap.py
+training_imgs/
+upstream_*.diff
+upstream_*.zip
+upstream_extracted/
