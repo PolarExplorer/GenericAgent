@@ -53,6 +53,7 @@ memory/L4_raw_sessions/*
 # ljqCtrl related tools
 !memory/ljqCtrl.py
 !memory/ljqCtrl_sop.md
+!memory/macljqCtrl.py
 !memory/computer_use.md
 
 # procmem_scanner related tools
@@ -86,10 +87,6 @@ memory/L4_raw_sessions/*
 
 # Morphling SOP
 !memory/morphling_sop.md
-
-# Skill Search SOP
-!memory/skill_search/
-!memory/skill_search/**
 
 
 # ADB UI tool
@@ -146,13 +143,6 @@ frontends/conductor_im_plugins/config.local.json
 **/__pycache__/
 
 .claude/
+# Project Mode SOP
+!memory/project_mode_sop.md
 
-# temp/backup files (neat 2026-06-10)
-debug_400_dump.json
-*.bak_*
-*.mvp4_backup
-bbs_bootstrap.py
-training_imgs/
-upstream_*.diff
-upstream_*.zip
-upstream_extracted/
